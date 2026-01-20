@@ -15,9 +15,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // MongoDB connection
 let db;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+// const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 
-// const MONGODB_URI = "mongodb+srv://Adebayo_server:Welldone123@@access-control-db.rabjklj.mongodb.net/?appName=access-control-db"
+const MONGODB_URI = "mongodb+srv://Adebayo_server:Welldone123@access-control-db.rabjklj.mongodb.net/?appName=access-control-db"
 
 const DB_NAME = 'access_control';
 
