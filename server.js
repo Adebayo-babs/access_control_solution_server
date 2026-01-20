@@ -16,6 +16,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // MongoDB connection
 let db;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+
+// const MONGODB_URI = "mongodb+srv://Adebayo_server:Welldone123@@access-control-db.rabjklj.mongodb.net/?appName=access-control-db"
+
 const DB_NAME = 'access_control';
 
 MongoClient.connect(MONGODB_URI)
@@ -41,7 +44,7 @@ const convertBinaryData = (data) => {
   return data;
 };
 
-// FIXED: Better face template comparison
+// Face template comparison
 const calculateTemplateSimilarity = (template1, template2) => {
   if (!template1 || !template2) {
     console.log('One or both templates are null');
@@ -71,7 +74,7 @@ const calculateTemplateSimilarity = (template1, template2) => {
   return similarity;
 };
 
-// FIXED: More accurate duplicate detection
+// More accurate duplicate detection
 const checkFaceDuplicate = async (faceTemplate) => {
   try {
     const allProfiles = await db.collection('profiles').find({}).toArray();
@@ -97,9 +100,7 @@ const checkFaceDuplicate = async (faceTemplate) => {
       }
     }
 
-    // CRITICAL FIX: Increased threshold to 98% to reduce false positives
-    // Neurotec templates should be nearly identical (>98%) to be the same person
-    const DUPLICATE_THRESHOLD = 98;
+    const DUPLICATE_THRESHOLD = 80;
 
     console.log(`Highest similarity: ${highestSimilarity.toFixed(2)}%`);
     console.log(`Threshold: ${DUPLICATE_THRESHOLD}%`);
@@ -131,7 +132,7 @@ app.post('/api/profiles', async (req, res) => {
   try {
     const { name, lagId, faceTemplate, faceImage, thumbnail } = req.body;
 
-    console.log('\n=== NEW PROFILE REQUEST ===');
+    console.log('\n NEW PROFILE REQUEST RECEIVED');
     console.log(`Name: ${name}`);
     console.log(`LAG ID: ${lagId}`);
 
@@ -156,17 +157,17 @@ app.post('/api/profiles', async (req, res) => {
     }
 
     // Check for duplicate face template
-    console.log('Checking for duplicate face...');
-    const faceCheck = await checkFaceDuplicate(faceTemplate);
-    if (faceCheck.isDuplicate) {
-      console.log(`Duplicate face found: ${faceCheck.profile.name} (${faceCheck.similarity.toFixed(2)}% similar)`);
-      return res.status(409).json({ 
-        success: false, 
-        error: `This face is already registered as ${faceCheck.profile.name}`,
-        duplicateType: 'FACE',
-        similarity: faceCheck.similarity
-      });
-    }
+    // console.log('Checking for duplicate face...');
+    // const faceCheck = await checkFaceDuplicate(faceTemplate);
+    // if (faceCheck.isDuplicate) {
+    //   console.log(`Duplicate face found: ${faceCheck.profile.name} (${faceCheck.similarity.toFixed(2)}% similar)`);
+    //   return res.status(409).json({ 
+    //     success: false, 
+    //     error: `This face is already registered as ${faceCheck.profile.name}`,
+    //     duplicateType: 'FACE',
+    //     similarity: faceCheck.similarity
+    //   });
+    // }
 
     console.log('No duplicates found. Saving profile...');
 
@@ -185,7 +186,6 @@ app.post('/api/profiles', async (req, res) => {
     const result = await db.collection('profiles').insertOne(profile);
 
     console.log(`Profile saved successfully: ${result.insertedId}`);
-    console.log('=== END REQUEST ===\n');
 
     res.status(201).json({
       success: true,
@@ -202,7 +202,7 @@ app.post('/api/profiles', async (req, res) => {
   }
 });
 
-// 2. Get All Profiles (lightweight - only essential data)
+// 2. Get All Profiles
 app.get('/api/profiles', async (req, res) => {
   try {
     const { includeImages = 'false', includeThumbnails = 'true' } = req.query;
