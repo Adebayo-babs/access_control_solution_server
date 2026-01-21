@@ -3,7 +3,6 @@ const express = require('express');
 const multer = require('multer');
 const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
-const { act } = require('react');
 require('dotenv').config();
 
 const app = express();
