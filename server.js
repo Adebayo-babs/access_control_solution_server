@@ -18,12 +18,11 @@ let db;
 // const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 
 const MONGODB_URI = "mongodb+srv://Adebayo_server:Welldone123@access-control-db.rabjklj.mongodb.net/?appName=access-control-db"
-
 const DB_NAME = 'access_control';
 
 MongoClient.connect(MONGODB_URI)
   .then(client => {
-    console.log('Connected to MongoDB');
+    console.log('Connected to MongoDB Atlas');
     db = client.db(DB_NAME);
     
     // Create indexes
@@ -639,7 +638,7 @@ app.get('/api/access/stats', async (req, res) => {
 // Clock in/out
 app.post('/api/attendance/clock', async (req, res) => {
   try {
-    const { lagId, name, type } = req.body;  // action: 'IN' | 'OUT'
+    const { lagId, name, action } = req.body;  // action: 'IN' | 'OUT'
     if (!lagId || !action) {
       return res.status(400).json({ 
         success: false, 
