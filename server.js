@@ -648,6 +648,7 @@ app.post('/api/attendance/clock', async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
     const currentTime = Date.now();
+    const currentTimeFormatted = new Date().toTimeString().split(' ')[0];
 
     // Find today's attendance record
     let attendance = await db.collection('attendance').findOne({ 
@@ -656,76 +657,120 @@ app.post('/api/attendance/clock', async (req, res) => {
     });
 
     if (action === 'IN') {
-      if (attendance && attendance.clockIn && !attendance.clockOut) {
-        return res.status(400).json({
-          success: false,
-          error: 'Already clocked in'
-        });
+      // Check if there is an active session (Clocked in but not out)
+      if (attendance?.sessions) {
+        const activeSession = attendance.sessions.find(s => s.clockIn && !s.clockOut);
+        if (activeSession) {
+          return res.status(400).json({
+            success: false,
+            error: 'Already clocked in'
+          });
+        }
       }
 
-      // Create new attendance record or update existing if clocking in again
-      attendance = {
-        lagId,
-        name,
-        date: today,
+      // Create new session
+      const newSession = {
         clockIn: currentTime,
-        clockInTime: new Date().toTimeString().split(' ')[0],
+        clockInTime: currentTimeFormatted,
         clockOut: null,
         clockOutTime: null,
-        duration: null,
-        status: 'PRESENT',
-        createdAt: new Date(),
-        updatedAt: new Date()
+        duration: null
       };
 
-      await db.collection('attendance').updateOne(
-        { lagId, date: today },
-        { $set: attendance },
-        { upsert: true }
-      );
-
-      console.log(`Clocked IN: ${name} (${lagId}) at ${attendance.clockInTime}`);
+      if (!attendance) {
+        // Create new attendance record with sessions array
+        attendance = {
+          lagId,
+          name,
+          date: today,
+          sessions: [newSession],
+          totalDuration: 0,
+          totalDurationFormatted: '0h 0m',
+          status: 'ACTIVE',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        await db.collection('attendance').insertOne(attendance);
+      } else {
+        // Add new session to existing record
+        await db.collection('attendance').updateOne(
+          { lagId, date: today },
+          { 
+            $push: { sessions: newSession },
+            $set: { 
+              status: 'ACTIVE',
+              updatedAt: new Date()
+          }
+        }
+        );
+      }
+      console.log(`Clocked IN: ${name} (${lagId}) at ${currentTimeFormatted}`);
 
     } else if (action === 'OUT') {
-      if (!attendance || !attendance.clockIn) {
+      if (!attendance || !attendance.sessions || attendance.sessions.length === 0) {
         return res.status(400).json({
           success: false,
           error: 'Please clock in'
         });
       }
 
-      if (attendance.clockOut) {
+      // Find the active session (clocked in but not out )
+      const activeSessionIndex = attendance.sessions.findIndex(s => s.clockIn && !s.clockOut);
+
+      if (activeSessionIndex === -1) {
         return res.status(400).json({
           success: false,
           error: 'Already clocked out'
         });
       }
 
-      const duration = currentTime - attendance.clockIn;
-      const hours = Math.floor(duration / (1000 * 60 * 60));
-      const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
+      // Calculate duration for this session
+      const activeSession = attendance.sessions[activeSessionIndex];
+      const sessionDuration = currentTime - activeSession.clockIn;
+      const hours = Math.floor(sessionDuration / (1000 * 60 * 60));
+      const minutes = Math.floor((sessionDuration % (1000 * 60 * 60)) / (1000 * 60));
 
+      // Update the active session
+      attendance.sessions[activeSessionIndex].clockOut = currentTime;
+      attendance.sessions[activeSessionIndex].clockOutTime = currentTimeFormatted;
+      attendance.sessions[activeSessionIndex].duration = sessionDuration;
+      attendance.sessions[activeSessionIndex].durationFormatted = `${hours}h ${minutes}m`;
+
+      // Calculate total duration for the day
+      const totalDuration = attendance.sessions.reduce((sum, session) => {
+        return sum + (session.duration || 0);
+      }, 0);
+      const totalHours = Math.floor(totalDuration / (1000 * 60 * 60));
+      const totalMinutes = Math.floor((totalDuration % (1000 * 60 * 60)) / (1000 * 60));
+
+      // Check if all sessions are completed
+      const hasActiveSessions = attendance.sessions.some(s => s.clockIn && !s.clockOut);
+      const newStatus = hasActiveSessions ? 'ACTIVE' : 'COMPLETED';
+
+    
       await db.collection('attendance').updateOne(
         { lagId, date: today },
         { 
           $set: {
-            clockOut: currentTime,
-            clockOutTime: new Date().toTimeString().split(' ')[0],
-            duration,
-            durationFormatted: `${hours}h ${minutes}m`,
-            status: 'COMPLETED',
+            sessions: attendance.sessions,
+            totalDuration: totalDuration,
+            totalDurationFormatted: `${totalHours}h ${totalMinutes}m`,
+            status: newStatus,
             updatedAt: new Date()
           } 
         }
       );
 
-      console.log(`Clocked OUT: ${name} (${lagId}) at ${new Date().toTimeString().split(' ')[0]} (Duration: ${hours}h ${minutes}m)`);
+      console.log(`Clocked OUT: ${name} (${lagId}) at ${currentTimeFormatted} (Session: ${hours}h ${minutes}m), Total: ${totalHours}h ${totalMinutes}m`);
     }
+
+    // Fetch updated record
+    const updatedAttendance = await db.collection('attendance').findOne({ lagId, date: today });
 
     res.json({
       success: true,
       message: `Clocked ${action.toLowerCase()} successfully`,
-      attendance: await db.collection('attendance').findOne({ lagId, date: today })
+      attendance: updatedAttendance
     })
 
     } catch (error) {
@@ -757,7 +802,7 @@ app.get('/api/attendance', async (req, res) => {
 
     const records = await db.collection('attendance')
       .find(query)
-      .sort({ date: -1, clockIn: -1 })
+      .sort({ date: -1})
       .skip(skip)
       .limit(parseInt(limit))
       .toArray();
@@ -769,13 +814,15 @@ app.get('/api/attendance', async (req, res) => {
       lagId: record.lagId,
       name: record.name,
       date: record.date,
-      clockIn: record.clockIn,
-      clockInTime: record.clockInTime,
-      clockOut: record.clockOut,
-      clockOutTime: record.clockOutTime,
-      duration: record.duration,
-      durationFormatted: record.durationFormatted,
-      status: record.status
+      sessions: record.sessions || [],
+      totalDuration: record.totalDuration || 0,
+      totalDurationFormatted: record.totalDurationFormatted || '0h 0m',
+      status: record.status,
+      // Backward compatibility - use first session if exists
+      clockIn: record.sessions?.[0]?.clockIn || null,
+      clockInTime: record.sessions?.[0]?.clockInTime || null,
+      clockOut: record.sessions?.[record.sessions.length -1]?.clockOut || null,
+      clockOutTime: record.sessions?.[record.sessions.length -1]?.clockOutTime || null
     }));
 
     res.json({
@@ -802,32 +849,36 @@ app.get('/api/attendance/today', async (req, res) => {
 
     const records = await db.collection('attendance')
       .find({ date: today })
-      .sort({ clockIn: -1 })
+      .sort({ updatedAt: -1 })
       .toArray();
 
-    const clockedIn = records.filter(r => r.clockIn && !r.clockOut).length;
-    const clockedOut = records.filter(r => r.clockOut).length;
+    const activeNow = records.filter(r => r.status === 'ACTIVE').length;
+    const completed = records.filter(r => r.status === 'COMPLETED').length;
 
     res.json({
       success: true,
       data: {
         date: today,
         totalPresent: records.length,
-        clockedIn,
-        clockedOut,
+        activeNow,
+        completed,
         records: records.map(record => ({
           id: record._id.toString(),
           lagId: record.lagId,
           name: record.name,
-          clockInTime: record.clockInTime,
-          clockOutTime: record.clockOutTime,
+          sessions: record.sessions || [],
+          totalDurationFormatted: record.totalDurationFormatted || '0h 0m',
           status: record.status,
-          durationFormatted: record.durationFormatted
+          lastAction: record.sessions?.length > 0 
+            ? (record.sessions[record.sessions.length -1].clockOut 
+              ? `Clocked OUT at ${record.sessions[record.sessions.length -1].clockOutTime}` 
+              : `Clocked IN at ${record.sessions[record.sessions.length -1].clockInTime}`) 
+            : 'No activity'
         }))
       }
     });
 
-  } catch (error) {
+  } catch (error) { 
     console.error('Error fetching today\'s attendance:', error);
     res.status(500).json({ 
       success: false, 
@@ -875,6 +926,9 @@ app.get('/api/attendance/report', async (req, res) => {
     const hours = Math.floor(avgDuration / (1000 * 60 * 60));
     const minutes = Math.floor((avgDuration % (1000 * 60 * 60)) / (1000 * 60));
 
+    const totalHours = Math.floor(totalDuration / (1000 * 60 * 60));
+    const totalMinutes = Math.floor((totalDuration % (1000 * 60 * 60)) / (1000 * 60));
+
     res.json({
       success: true,
       report: {
@@ -883,13 +937,14 @@ app.get('/api/attendance/report', async (req, res) => {
         totalDays,
         completedDays,
         incompleteDays: totalDays - completedDays,
+        totalDurationFormatted: `${totalHours}h ${totalMinutes}m`,
         avgDurationFormatted: `${hours}h ${minutes}m`,
         records: records.map(record => ({
           date: record.date,
-          clockInTime: record.clockInTime,
-          clockOutTime: record.clockOutTime,
-          durationFormatted: record.durationFormatted,
-          status: record.status
+          sessions: record.sessions || [],
+          totalDurationFormatted: record.totalDurationFormatted || '0h 0m',
+          status: record.status,
+          sessionsCount: record.sessions?.length || 0
         }))
       }
     });
