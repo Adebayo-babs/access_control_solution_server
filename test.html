@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .stats-bar {
+            background: white;
+            padding: 20px 30px;
+            display: flex;
+            gap: 30px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .stat-icon.present {
+            background: #e8f5e9;
+        }
+
+        .stat-icon.active {
+            background: #fff3e0;
+        }
+
+        .stat-details h3 {
+            font-size: 24px;
+            color: #333;
+            font-weight: 700;
+        }
+
+        .stat-details p {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 0 0 20px 20px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        th {
+            padding: 18px 20px;
+            text-align: left;
+            font-weight: 600;
+            color: white;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #f0f0f0;
+            transition: all 0.3s ease;
+        }
+
+        tbody tr:hover {
+            background: #f8f9ff;
+            transform: translateX(5px);
+        }
+
+        tbody tr.latest-activity {
+            background: #fffbf0;
+            animation: highlight 1s ease;
+        }
+
+        @keyframes highlight {
+            0% { background: #fff9c4; }
+            100% { background: #fffbf0; }
+        }
+
+        td {
+            padding: 20px;
+            font-size: 15px;
+            color: #333;
+        }
+
+        .lag-id {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .name {
+            font-weight: 500;
+        }
+
+        .time {
+            color: #666;
+            font-family: 'Courier New', monospace;
+        }
+
+        .time.clocked-in {
+            color: #2e7d32;
+            font-weight: 600;
+        }
+
+        .time.clocked-out {
+            color: #1565c0;
+            font-weight: 600;
+        }
+
+        .time.pending {
+            color: #999;
+            font-style: italic;
+        }
+
+        .sessions-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .sessions-badge:hover {
+            background: #1565c0;
+            color: white;
+            transform: scale(1.05);
+        }
+
+        .sessions-badge.active {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .sessions-badge.active:hover {
+            background: #e65100;
+            color: white;
+        }
+
+        .sessions-detail {
+            display: none;
+            background: #f8f9ff;
+            padding: 0;
+        }
+
+        .sessions-detail.show {
+            display: table-row;
+        }
+
+        .sessions-content {
+            padding: 20px 40px;
+        }
+
+        .sessions-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .session-item {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        .session-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .session-number {
+            font-weight: 700;
+            color: #667eea;
+            font-size: 14px;
+        }
+
+        .session-times {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+
+        .session-time-block {
+            text-align: center;
+        }
+
+        .session-time-label {
+            font-size: 11px;
+            color: #999;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .session-time-value {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .session-time-value.in {
+            color: #2e7d32;
+        }
+
+        .session-time-value.out {
+            color: #1565c0;
+        }
+
+        .session-time-value.ongoing {
+            color: #e65100;
+        }
+
+        .session-duration {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .session-duration.ongoing {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .pagination {
+            background: white;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 2px solid #f0f0f0;
+            border-radius: 0 0 20px 20px;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .page-btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .page-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .page-btn.active {
+            background: #764ba2;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator.active {
+            background: #4caf50;
+            box-shadow: 0 0 10px #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.completed {
+            background: #2196f3;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .total-duration {
+            color: #666;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        .arrow-icon {
+            display: inline-block;
+            transition: transform 0.3s ease;
+        }
+
+        .arrow-icon.rotated {
+            transform: rotate(180deg);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Real-Time Attendance Dashboard</h1>
+            <p>Today's Date: January 27, 2026 | Last Updated: Just now</p>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-item">
+                <div class="stat-icon present">👥</div>
+                <div class="stat-details">
+                    <h3>20/25</h3>
+                    <p>Present Today</p>
+                </div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-icon active">⏱️</div>
+                <div class="stat-details">
+                    <h3>12</h3>
+                    <p>Currently Active</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table id="attendanceTable">
+                <thead>
+                    <tr>
+                        <th>LAG ID</th>
+                        <th>Name</th>
+                        <th>Clock In Time</th>
+                        <th>Clock Out Time</th>
+                        <th>Sessions</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <!-- Data will be populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pagination">
+            <div class="pagination-info">
+                Showing <strong><span id="currentRange">1-5</span></strong> of <strong><span id="totalRecords">20</span></strong> records
+            </div>
+            <div class="pagination-buttons">
+                <button class="page-btn" id="prevBtn" onclick="changePage(-1)">← Previous</button>
+                <button class="page-btn active" id="page1" onclick="goToPage(1)">1</button>
+                <button class="page-btn" id="page2" onclick="goToPage(2)">2</button>
+                <button class="page-btn" id="page3" onclick="goToPage(3)">3</button>
+                <button class="page-btn" id="page4" onclick="goToPage(4)">4</button>
+                <button class="page-btn" id="nextBtn" onclick="changePage(1)">Next →</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample data - 20 staff members with realistic clock in/out patterns
+        const attendanceData = [
+            { lagId: 'LAG001', name: 'Adebayo Johnson', sessions: [{in: '08:05', out: '09:10', duration: '1h 5m'}, {in: '10:30', out: null, duration: 'Ongoing'}], lastActivity: '10:30', status: 'active' },
+            { lagId: 'LAG015', name: 'John Okafor', sessions: [{in: '09:05', out: null, duration: 'Ongoing'}], lastActivity: '09:05', status: 'active' },
+            { lagId: 'LAG008', name: 'Ope Williams', sessions: [{in: '09:00', out: null, duration: 'Ongoing'}], lastActivity: '09:00', status: 'active' },
+            { lagId: 'LAG005', name: 'Malik Hassan', sessions: [{in: '08:35', out: null, duration: 'Ongoing'}], lastActivity: '08:35', status: 'active' },
+            { lagId: 'LAG002', name: 'Chioma Eze', sessions: [{in: '08:15', out: '12:00', duration: '3h 45m'}], lastActivity: '12:00', status: 'completed' },
+            { lagId: 'LAG003', name: 'Ibrahim Yusuf', sessions: [{in: '08:20', out: '12:15', duration: '3h 55m'}, {in: '13:00', out: '17:30', duration: '4h 30m'}], lastActivity: '17:30', status: 'completed' },
+            { lagId: 'LAG004', name: 'Amina Bello', sessions: [{in: '08:10', out: '11:45', duration: '3h 35m'}], lastActivity: '11:45', status: 'completed' },
+            { lagId: 'LAG006', name: 'Tunde Adeyemi', sessions: [{in: '08:30', out: '12:30', duration: '4h 0m'}, {in: '13:15', out: null, duration: 'Ongoing'}], lastActivity: '13:15', status: 'active' },
+            { lagId: 'LAG007', name: 'Blessing Okoro', sessions: [{in: '08:25', out: '12:10', duration: '3h 45m'}], lastActivity: '12:10', status: 'completed' },
+            { lagId: 'LAG009', name: 'Emeka Nwosu', sessions: [{in: '08:45', out: '12:20', duration: '3h 35m'}, {in: '13:05', out: '17:00', duration: '3h 55m'}], lastActivity: '17:00', status: 'completed' },
+            { lagId: 'LAG010', name: 'Fatima Abdullahi', sessions: [{in: '08:55', out: null, duration: 'Ongoing'}], lastActivity: '08:55', status: 'active' },
+            { lagId: 'LAG011', name: 'Samuel Oladipo', sessions: [{in: '09:10', out: '12:40', duration: '3h 30m'}], lastActivity: '12:40', status: 'completed' },
+            { lagId: 'LAG012', name: 'Grace Ugwu', sessions: [{in: '08:40', out: '12:05', duration: '3h 25m'}, {in: '13:10', out: '17:15', duration: '4h 5m'}], lastActivity: '17:15', status: 'completed' },
+            { lagId: 'LAG013', name: 'David Okon', sessions: [{in: '08:50', out: null, duration: 'Ongoing'}], lastActivity: '08:50', status: 'active' },
+            { lagId: 'LAG014', name: 'Ngozi Ike', sessions: [{in: '09:15', out: '12:25', duration: '3h 10m'}], lastActivity: '12:25', status: 'completed' },
+            { lagId: 'LAG016', name: 'Ahmed Musa', sessions: [{in: '08:12', out: '12:18', duration: '4h 6m'}, {in: '13:20', out: null, duration: 'Ongoing'}], lastActivity: '13:20', status: 'active' },
+            { lagId: 'LAG017', name: 'Kemi Ajayi', sessions: [{in: '08:18', out: '11:50', duration: '3h 32m'}], lastActivity: '11:50', status: 'completed' },
+            { lagId: 'LAG018', name: 'Chukwudi Obi', sessions: [{in: '09:20', out: null, duration: 'Ongoing'}], lastActivity: '09:20', status: 'active' },
+            { lagId: 'LAG019', name: 'Aisha Balogun', sessions: [{in: '08:28', out: '12:35', duration: '4h 7m'}, {in: '13:25', out: '17:20', duration: '3h 55m'}], lastActivity: '17:20', status: 'completed' },
+            { lagId: 'LAG020', name: 'Peter Okonkwo', sessions: [{in: '09:25', out: null, duration: 'Ongoing'}], lastActivity: '09:25', status: 'active' }
+        ];
+
+        let currentPage = 1;
+        const rowsPerPage = 5;
+        const totalPages = Math.ceil(attendanceData.length / rowsPerPage);
+
+        function formatTime(time) {
+            return time || '<span class="pending">Not clocked out</span>';
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = startIndex + rowsPerPage;
+            const pageData = attendanceData.slice(startIndex, endIndex);
+
+            pageData.forEach((staff, index) => {
+                const latestSession = staff.sessions[staff.sessions.length - 1];
+                const isLatest = startIndex + index === 0; // First row is latest activity
+                const totalSessions = staff.sessions.length;
+                
+                // Calculate total duration
+                let totalMinutes = 0;
+                staff.sessions.forEach(session => {
+                    if (session.duration !== 'Ongoing') {
+                        const match = session.duration.match(/(\d+)h (\d+)m/);
+                        if (match) {
+                            totalMinutes += parseInt(match[1]) * 60 + parseInt(match[2]);
+                        }
+                    }
+                });
+                const totalHours = Math.floor(totalMinutes / 60);
+                const totalMins = totalMinutes % 60;
+                const totalDuration = `${totalHours}h ${totalMins}m`;
+
+                // Main row
+                const row = document.createElement('tr');
+                if (isLatest) row.classList.add('latest-activity');
+                
+                row.innerHTML = `
+                    <td><span class="lag-id">${staff.lagId}</span></td>
+                    <td class="name">
+                        <span class="status-indicator ${staff.status}"></span>
+                        ${staff.name}
+                    </td>
+                    <td class="time clocked-in">${latestSession.in}</td>
+                    <td class="time ${latestSession.out ? 'clocked-out' : 'pending'}">
+                        ${latestSession.out || 'Still clocked in'}
+                    </td>
+                    <td>
+                        <span class="sessions-badge ${staff.status}" onclick="toggleSessions('${staff.lagId}')">
+                            ${totalSessions} Session${totalSessions > 1 ? 's' : ''}
+                            <span class="arrow-icon" id="arrow-${staff.lagId}">▼</span>
+                        </span>
+                        <div class="total-duration">Total: ${totalDuration}${staff.status === 'active' ? ' (ongoing)' : ''}</div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+
+                // Sessions detail row
+                const detailRow = document.createElement('tr');
+                detailRow.classList.add('sessions-detail');
+                detailRow.id = `detail-${staff.lagId}`;
+                
+                let sessionsHTML = '';
+                staff.sessions.forEach((session, idx) => {
+                    const isOngoing = session.out === null;
+                    sessionsHTML += `
+                        <div class="session-item">
+                            <div class="session-number">Session ${idx + 1}</div>
+                            <div class="session-times">
+                                <div class="session-time-block">
+                                    <div class="session-time-label">Clock In</div>
+                                    <div class="session-time-value in">${session.in}</div>
+                                </div>
+                                <div style="color: #ccc; font-size: 24px;">→</div>
+                                <div class="session-time-block">
+                                    <div class="session-time-label">Clock Out</div>
+                                    <div class="session-time-value ${isOngoing ? 'ongoing' : 'out'}">
+                                        ${session.out || 'Active'}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="session-duration ${isOngoing ? 'ongoing' : ''}">
+                                ${session.duration}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                detailRow.innerHTML = `
+                    <td colspan="5">
+                        <div class="sessions-content">
+                            <div class="sessions-title">
+                                📋 All Sessions for ${staff.name} (${staff.lagId})
+                            </div>
+                            ${sessionsHTML}
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(detailRow);
+            });
+
+            updatePagination();
+        }
+
+        function toggleSessions(lagId) {
+            const detailRow = document.getElementById(`detail-${lagId}`);
+            const arrow = document.getElementById(`arrow-${lagId}`);
+            
+            detailRow.classList.toggle('show');
+            arrow.classList.toggle('rotated');
+        }
+
+        function updatePagination() {
+            const startIndex = (currentPage - 1) * rowsPerPage + 1;
+            const endIndex = Math.min(currentPage * rowsPerPage, attendanceData.length);
+            
+            document.getElementById('currentRange').textContent = `${startIndex}-${endIndex}`;
+            document.getElementById('totalRecords').textContent = attendanceData.length;
+
+            // Update prev/next buttons
+            document.getElementById('prevBtn').disabled = currentPage === 1;
+            document.getElementById('nextBtn').disabled = currentPage === totalPages;
+
+            // Update page number buttons
+            for (let i = 1; i <= totalPages; i++) {
+                const pageBtn = document.getElementById(`page${i}`);
+                if (pageBtn) {
+                    if (i === currentPage) {
+                        pageBtn.classList.add('active');
+                    } else {
+                        pageBtn.classList.remove('active');
+                    }
+                }
+            }
+        }
+
+        function changePage(direction) {
+            const newPage = currentPage + direction;
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                renderTable();
+            }
+        }
+
+        function goToPage(page) {
+            if (page >= 1 && page <= totalPages) {
+                currentPage = page;
+                renderTable();
+            }
+        }
+
+        // Initial render
+        renderTable();
+
+        // Simulate real-time updates (optional - for demo purposes)
+        // Uncomment to see live updates
+        /*
+        setInterval(() => {
+            // Simulate someone clocking in/out
+            const randomIndex = Math.floor(Math.random() * attendanceData.length);
+            const staff = attendanceData[randomIndex];
+            
+            // Move to top (latest activity)
+            attendanceData.splice(randomIndex, 1);
+            attendanceData.unshift(staff);
+            
+            if (currentPage === 1) {
+                renderTable();
+            }
+        }, 5000); // Update every 5 seconds
+        */
+    </script>
+</body>
+</html>

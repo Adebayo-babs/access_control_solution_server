@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Debug Tool</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4ec9b0;
+            border-bottom: 2px solid #4ec9b0;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #dcdcaa;
+            margin-top: 30px;
+        }
+        .section {
+            background: #252526;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border: 1px solid #3c3c3c;
+        }
+        .input-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            color: #9cdcfe;
+            margin-bottom: 5px;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            color: #d4d4d4;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        button.success {
+            background: #4ec9b0;
+        }
+        button.danger {
+            background: #f48771;
+        }
+        .result {
+            background: #1e1e1e;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+            border: 1px solid #3c3c3c;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .success-text {
+            color: #4ec9b0;
+        }
+        .error-text {
+            color: #f48771;
+        }
+        .warning-text {
+            color: #dcdcaa;
+        }
+        .info-text {
+            color: #9cdcfe;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-online {
+            background: #4ec9b0;
+            box-shadow: 0 0 10px #4ec9b0;
+        }
+        .status-offline {
+            background: #f48771;
+        }
+        code {
+            background: #1e1e1e;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #ce9178;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Attendance API Debug Tool</h1>
+
+        <div class="section">
+            <h2>Step 1: Server Configuration</h2>
+            <div class="input-group">
+                <label>Server URL (without /api)</label>
+                <input type="text" id="serverUrl" value="https://access-control-solution-server.onrender.com" placeholder="http://192.168.1.100:3000">
+            </div>
+            <button onclick="testConnection()">Test Connection</button>
+            <div id="connectionResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 2: Check Today's Attendance</h2>
+            <button onclick="checkTodayAttendance()">Fetch Today's Attendance</button>
+            <button class="success" onclick="checkAllAttendance()">Fetch ALL Attendance Records</button>
+            <div id="attendanceResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 3: Create Test Data</h2>
+            <p class="warning-text">⚠️ This will create test attendance records in your database</p>
+            <button class="success" onclick="createTestClockIn()">Create Test Clock-In</button>
+            <button class="danger" onclick="createTestClockOut()">Create Test Clock-Out</button>
+            <div id="testDataResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 4: Database Check</h2>
+            <button onclick="checkDatabase()">Check Database Collections</button>
+            <div id="dbResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 5: Manual Clock In/Out</h2>
+            <div class="input-group">
+                <label>LAG ID</label>
+                <input type="text" id="lagId" value="LAG001" placeholder="LAG001">
+            </div>
+            <div class="input-group">
+                <label>Name</label>
+                <input type="text" id="name" value="Test User" placeholder="John Doe">
+            </div>
+            <button class="success" onclick="manualClockIn()">Clock In</button>
+            <button class="danger" onclick="manualClockOut()">Clock Out</button>
+            <div id="manualResult" class="result" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script>
+        function getServerUrl() {
+            return document.getElementById('serverUrl').value;
+        }
+
+        async function testConnection() {
+            const result = document.getElementById('connectionResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Testing connection...</span>';
+
+            try {
+                const response = await fetch(`${getServerUrl()}/api/health`);
+                const data = await response.json();
+
+                if (data.success) {
+                    result.innerHTML = `
+<span class="success-text">✅ Connection successful!</span>
+<span class="status-indicator status-online"></span> Server is online
+
+Response: ${JSON.stringify(data, null, 2)}
+                    `;
+                } else {
+                    result.innerHTML = `<span class="error-text">❌ Server responded but returned error</span>\n${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                result.innerHTML = `
+<span class="error-text">❌ Connection failed!</span>
+
+Error: ${error.message}
+
+Possible causes:
+1. Server is not running
+2. Wrong server URL (check IP address and port)
+3. CORS issue (check server CORS settings)
+4. Network/firewall blocking the connection
+
+Current URL: ${getServerUrl()}/api/health
+                `;
+            }
+        }
+
+        async function checkTodayAttendance() {
+            const result = document.getElementById('attendanceResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Fetching today\'s attendance...</span>';
+
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const response = await fetch(`${getServerUrl()}/api/attendance/today`);
+                const data = await response.json();
+
+                result.innerHTML = `
+<span class="success-text">✅ Request successful!</span>
+
+Date: ${today}
+
+Response:
+${JSON.stringify(data, null, 2)}
+
+Records found: ${data.data?.records?.length || 0}
+Total present: ${data.data?.totalPresent || 0}
+Currently active: ${data.data?.activeNow || 0}
+                `;
+
+                if (data.data?.records?.length === 0) {
+                    result.innerHTML += `\n<span class="warning-text">⚠️ No attendance records for today!</span>
+
+This could mean:
+1. No one has clocked in today
+2. The date in database doesn't match today's date
+3. Database is empty
+
+Try:
+- Check "Fetch ALL Attendance Records" to see if there's data from other dates
+- Create test data using "Create Test Clock-In"
+- Use your Android app to clock in
+                    `;
+                }
+            } catch (error) {
+                result.innerHTML = `<span class="error-text">❌ Error: ${error.message}</span>`;
+            }
+        }
+
+        async function checkAllAttendance() {
+            const result = document.getElementById('attendanceResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Fetching ALL attendance records...</span>';
+
+            try {
+                const response = await fetch(`${getServerUrl()}/api/attendance?limit=100`);
+                const data = await response.json();
+
+                result.innerHTML = `
+<span class="success-text">✅ Request successful!</span>
+
+Response:
+${JSON.stringify(data, null, 2)}
+
+Total records in database: ${data.total || 0}
+Records returned: ${data.records?.length || 0}
+                `;
+
+                if (data.total === 0) {
+                    result.innerHTML += `\n<span class="error-text">❌ Database is completely empty!</span>
+
+The attendance collection has no records at all.
+
+Next steps:
+1. Use your Android app to clock in/out
+2. Or use "Create Test Clock-In" below to create sample data
+                    `;
+                } else {
+                    result.innerHTML += `\n\n<span class="success-text">Found ${data.total} records!</span>
+
+Dates in database:
+${[...new Set(data.records.map(r => r.date))].join('\n')}
+                    `;
+                }
+            } catch (error) {
+                result.innerHTML = `<span class="error-text">❌ Error: ${error.message}</span>`;
+            }
+        }
+
+        async function createTestClockIn() {
+            const result = document.getElementById('testDataResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Creating test clock-in...</span>';
+
+            try {
+                const testData = {
+                    lagId: 'TEST001',
+                    name: 'Test User ' + Math.floor(Math.random() * 100),
+                    action: 'IN'
+                };
+
+                const response = await fetch(`${getServerUrl()}/api/attendance/clock`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(testData)
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    result.innerHTML = `
+<span class="success-text">✅ Test clock-in created successfully!</span>
+
+Request:
+${JSON.stringify(testData, null, 2)}
+
+Response:
+${JSON.stringify(data, null, 2)}
+
+Now refresh the attendance dashboard to see the new record!
+                    `;
+                } else {
+                    result.innerHTML = `
+<span class="error-text">❌ Failed to create test data</span>
+
+${JSON.stringify(data, null, 2)}
+                    `;
+                }
+            } catch (error) {
+                result.innerHTML = `<span class="error-text">❌ Error: ${error.message}</span>`;
+            }
+        }
+
+        async function createTestClockOut() {
+            const result = document.getElementById('testDataResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Creating test clock-out...</span>';
+
+            try {
+                const testData = {
+                    lagId: 'TEST001',
+                    name: 'Test User',
+                    action: 'OUT'
+                };
+
+                const response = await fetch(`${getServerUrl()}/api/attendance/clock`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(testData)
+                });
+
+                const data = await response.json();
+                
+                result.innerHTML = `
+Request:
+${JSON.stringify(testData, null, 2)}
+
+Response:
+${JSON.stringify(data, null, 2)}
+
+${data.success ? '<span class="success-text">✅ Success!</span>' : '<span class="error-text">❌ Failed - make sure you clocked in first!</span>'}
+                `;
+            } catch (error) {
+                result.innerHTML = `<span class="error-text">❌ Error: ${error.message}</span>`;
+            }
+        }
+
+        async function checkDatabase() {
+            const result = document.getElementById('dbResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Checking database...</span>';
+
+            try {
+                // Try to add the debug endpoint if it exists
+                const response = await fetch(`${getServerUrl()}/api/debug/database`);
+                
+                if (response.status === 404) {
+                    result.innerHTML = `
+<span class="warning-text">⚠️ Debug endpoint not found</span>
+
+The /api/debug/database endpoint is not available.
+This endpoint was in the artifacts but may not be in your server.js
+
+You can add it by copying from the "Debug Endpoints for Testing" artifact.
+
+Trying alternative check...
+                    `;
+                    
+                    // Alternative: Check profiles count
+                    const profilesResponse = await fetch(`${getServerUrl()}/api/profiles/stats/count`);
+                    const profilesData = await profilesResponse.json();
+                    
+                    result.innerHTML += `
+Profiles in database: ${profilesData.data || 0}
+                    `;
+                } else {
+                    const data = await response.json();
+                    result.innerHTML = `
+<span class="success-text">✅ Database info retrieved!</span>
+
+${JSON.stringify(data, null, 2)}
+                    `;
+                }
+            } catch (error) {
+                result.innerHTML = `<span class="error-text">❌ Error: ${error.message}</span>`;
+            }
+        }
+
+        async function manualClockIn() {
+            const lagId = document.getElementById('lagId').value;
+            const name = document.getElementById('name').value;
+            const result = document.getElementById('manualResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Clocking in...</span>';
+
+            try {
+                const response = await fetch(`${getServerUrl()}/api/attendance/clock`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lagId, name, action: 'IN' })
+                });
+
+                const data = await response.json();
+                
+                result.innerHTML = `
+<span class="${data.success ? 'success-text' : 'error-text'}">${data.success ? '✅' : '❌'} ${data.message || data.error}</span>
+
+Response:
+${JSON.stringify(data, null, 2)}
+                `;
+            } catch (error) {
+                result.innerHTML = `<span class="error-text">❌ Error: ${error.message}</span>`;
+            }
+        }
+
+        async function manualClockOut() {
+            const lagId = document.getElementById('lagId').value;
+            const name = document.getElementById('name').value;
+            const result = document.getElementById('manualResult');
+            result.style.display = 'block';
+            result.innerHTML = '<span class="info-text">Clocking out...</span>';
+
+            try {
+                const response = await fetch(`${getServerUrl()}/api/attendance/clock`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lagId, name, action: 'OUT' })
+                });
+
+                const data = await response.json();
+                
+                result.innerHTML = `
+<span class="${data.success ? 'success-text' : 'error-text'}">${data.success ? '✅' : '❌'} ${data.message || data.error}</span>
+
+Response:
+${JSON.stringify(data, null, 2)}
+                `;
+            } catch (error) {
+                result.innerHTML = `<span class="error-text">❌ Error: ${error.message}</span>`;
+            }
+        }
+
+        // Auto-test connection on load
+        window.onload = () => {
+            testConnection();
+        };
+    </script>
+</body>
+</html>

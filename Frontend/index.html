@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // API Configuration - CHANGE THIS TO YOUR SERVER IP
+        const API_BASE_URL = 'https://access-control-solution-server.onrender.com/api';
+
+        function AttendanceDashboard() {
+            const [activityLog, setActivityLog] = useState([]);
+            const [stats, setStats] = useState({ totalPresent: 0, activeNow: 0 });
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [currentPage, setCurrentPage] = useState(1);
+            const [expandedSessions, setExpandedSessions] = useState({});
+            const [selectedDate, setSelectedDate] = useState('today');
+            const [currentDate, setCurrentDate] = useState('');
+            const [availableDates, setAvailableDates] = useState([]);
+            const rowsPerPage = 5;
+
+            useEffect(() => {
+                loadAvailableDates();
+            }, []);
+
+            useEffect(() => {
+                fetchAttendanceData();
+                const interval = setInterval(fetchAttendanceData, 600000); // Refresh every 10 minutes
+                return () => clearInterval(interval);
+            }, [selectedDate]);
+
+            const loadAvailableDates = async () => {
+                try {
+                    // Fetch all records to get available dates
+                    const response = await fetch(`${API_BASE_URL}/attendance`);
+                    const data = await response.json();
+                    
+                    if (data.success && data.records) {
+                        const dates = [...new Set(data.records.map(r => r.date))].sort().reverse();
+                        setAvailableDates(dates);
+                        
+                        // If no data for today, auto-select the most recent date
+                        const today = new Date().toISOString().split('T')[0];
+                        if (!dates.includes(today) && dates.length > 0) {
+                            setSelectedDate(dates[0]); // Most recent date
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error loading dates:', err);
+                }
+            };
+
+            const fetchAttendanceData = async () => {
+                try {
+                    setLoading(true);
+                    setError(null);
+
+                    // Determine which date to fetch
+                    const targetDate = selectedDate === 'today' 
+                        ? new Date().toISOString().split('T')[0]
+                        : selectedDate;
+
+                    setCurrentDate(new Date(targetDate + 'T12:00:00').toLocaleDateString('en-US', { 
+                        weekday: 'long', 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                    }));
+
+                    console.log('Fetching attendance for date:', targetDate);
+
+                    // Fetch attendance for selected date
+                    const response = await fetch(
+                        `${API_BASE_URL}/attendance?startDate=${targetDate}&endDate=${targetDate}&limit=100`
+                    );
+                    console.log('Response status:', response.status);
+                    
+                    const data = await response.json();
+                    console.log('Response data:', data);
+
+                    if (data.success) {
+                        // Build activity log - ONE ROW PER PERSON, sorted by their latest activity
+                        const staffMap = new Map();
+                        
+                        data.records.forEach(record => {
+                            if (record.sessions && record.sessions.length > 0) {
+                                // Find the latest activity (last clock in or clock out)
+                                let latestTimestamp = 0;
+                                let latestAction = 'clock-in';
+                                let latestTimeFormatted = '';
+                                
+                                record.sessions.forEach(session => {
+                                    // Check clock in
+                                    if (session.clockIn > latestTimestamp) {
+                                        latestTimestamp = session.clockIn;
+                                        latestAction = 'clock-in';
+                                        latestTimeFormatted = session.clockInTime;
+                                    }
+                                    
+                                    // Check clock out
+                                    if (session.clockOut && session.clockOut > latestTimestamp) {
+                                        latestTimestamp = session.clockOut;
+                                        latestAction = 'clock-out';
+                                        latestTimeFormatted = session.clockOutTime;
+                                    }
+                                });
+                                
+                                // Store one entry per person with their latest activity time
+                                staffMap.set(record.lagId, {
+                                    timestamp: latestTimestamp,
+                                    timeFormatted: latestTimeFormatted,
+                                    lagId: record.lagId,
+                                    name: record.name,
+                                    action: latestAction,
+                                    sessions: record.sessions,
+                                    status: record.status,
+                                    totalDuration: record.totalDurationFormatted
+                                });
+                            }
+                        });
+
+                        // Convert map to array and sort by latest activity (timestamp)
+                        const activities = Array.from(staffMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+
+                        setActivityLog(activities);
+                        
+                        // Calculate stats
+                        const uniqueStaff = new Set(data.records.map(r => r.lagId));
+                        const activeStaff = data.records.filter(r => r.status === 'ACTIVE');
+                        
+                        setStats({
+                            totalPresent: uniqueStaff.size,
+                            activeNow: activeStaff.length
+                        });
+                    } else {
+                        setError(data.error || 'Failed to fetch attendance data');
+                    }
+
+                    setLoading(false);
+                } catch (err) {
+                    console.error('Error fetching attendance:', err);
+                    setError('Failed to connect to server. Please check if the server is running.');
+                    setLoading(false);
+                }
+            };
+
+            const toggleSessions = (activityId) => {
+                setExpandedSessions(prev => ({
+                    ...prev,
+                    [activityId]: !prev[activityId]
+                }));
+            };
+
+            const totalPages = Math.ceil(activityLog.length / rowsPerPage);
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = startIndex + rowsPerPage;
+            const currentActivities = activityLog.slice(startIndex, endIndex);
+
+            if (loading) {
+                return (
+                    <div className="container">
+                        <div className="header">
+                            <h1>📊 Real-Time Attendance Dashboard</h1>
+                        </div>
+                        <div className="table-container">
+                            <div className="loading">⏳ Loading attendance data...</div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (error) {
+                return (
+                    <div className="container">
+                        <div className="header">
+                            <h1>📊 Real-Time Attendance Dashboard</h1>
+                        </div>
+                        <div className="table-container">
+                            <div className="error">❌ {error}</div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <div className="header-actions">
+                            <div>
+                                <h1>📊 Real-Time Attendance Dashboard</h1>
+                                <p>{currentDate} | Last Updated: {new Date().toLocaleTimeString()}</p>
+                            </div>
+                            <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+                                <select 
+                                    value={selectedDate}
+                                    onChange={(e) => setSelectedDate(e.target.value)}
+                                    style={{
+                                        padding: '10px 15px',
+                                        borderRadius: '8px',
+                                        border: '2px solid #667eea',
+                                        background: 'white',
+                                        color: '#333',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    <option value="today">Today</option>
+                                    {availableDates.map(date => (
+                                        <option key={date} value={date}>
+                                            {new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
+                                                month: 'short',
+                                                day: 'numeric',
+                                                year: 'numeric'
+                                            })}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button className="refresh-btn" onClick={fetchAttendanceData}>
+                                    🔄 Refresh
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="stats-bar">
+                        <div className="stat-item">
+                            <div className="stat-icon present">👥</div>
+                            <div className="stat-details">
+                                <h3>{stats.totalPresent}</h3>
+                                <p>Present Today</p>
+                            </div>
+                        </div>
+                        <div className="stat-item">
+                            <div className="stat-icon active">⏱️</div>
+                            <div className="stat-details">
+                                <h3>{stats.activeNow}</h3>
+                                <p>Currently Active</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>LAG ID</th>
+                                    <th>Name</th>
+                                    <th>Clock In Time</th>
+                                    <th>Clock Out Time</th>
+                                    <th>Sessions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {currentActivities.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="5" style={{textAlign: 'center', padding: '40px'}}>
+                                            No attendance records for {selectedDate === 'today' ? 'today' : 'this date'}
+                                            {availableDates.length > 0 && (
+                                                <div style={{marginTop: '15px', color: '#666', fontSize: '14px'}}>
+                                                    💡 Try selecting a different date from the dropdown above
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    currentActivities.map((activity, index) => {
+                                        const isLatest = startIndex + index === 0;
+                                        const activityId = `${activity.lagId}-${activity.timestamp}`;
+                                        const latestSession = activity.sessions[activity.sessions.length - 1];
+
+                                        return (
+                                            <React.Fragment key={activityId}>
+                                                <tr className={isLatest ? 'latest-activity' : ''}>
+                                                    <td>
+                                                        <span className="lag-id">{activity.lagId}</span>
+                                                        {isLatest && <span className="latest-badge">Latest</span>}
+                                                    </td>
+                                                    <td className="name">
+                                                        <span className={`status-indicator ${activity.status.toLowerCase()}`}></span>
+                                                        {activity.name}
+                                                        <div className={`action-type ${activity.action}`}>
+                                                            Last action: {activity.action === 'clock-in' ? '⏱️ Clocked In' : '✅ Clocked Out'} at {activity.timeFormatted}
+                                                        </div>
+                                                    </td>
+                                                    <td className="time clocked-in">{latestSession.clockInTime}</td>
+                                                    <td className={`time ${latestSession.clockOutTime ? 'clocked-out' : 'pending'}`}>
+                                                        {latestSession.clockOutTime || 'Still clocked in'}
+                                                    </td>
+                                                    <td>
+                                                        <span 
+                                                            className={`sessions-badge ${activity.status.toLowerCase()}`}
+                                                            onClick={() => toggleSessions(activityId)}
+                                                        >
+                                                            {activity.sessions.length} Session{activity.sessions.length > 1 ? 's' : ''}
+                                                            <span className={`arrow-icon ${expandedSessions[activityId] ? 'rotated' : ''}`}>▼</span>
+                                                        </span>
+                                                        <div className="total-duration">
+                                                            Total: {activity.totalDuration}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {expandedSessions[activityId] && (
+                                                    <tr className="sessions-detail show">
+                                                        <td colSpan="5">
+                                                            <div className="sessions-content">
+                                                                <div className="sessions-title">
+                                                                    <span>📋 All Sessions for {activity.name} ({activity.lagId})</span>
+                                                                    <span className="total-time-badge">
+                                                                        Total Time Today: {activity.totalDuration}
+                                                                    </span>
+                                                                </div>
+                                                                {activity.sessions.map((session, idx) => {
+                                                                    const isOngoing = !session.clockOut;
+                                                                    return (
+                                                                        <div key={idx} className="session-item">
+                                                                            <div className="session-number">Session {idx + 1}</div>
+                                                                            <div className="session-times">
+                                                                                <div className="session-time-block">
+                                                                                    <div className="session-time-label">Clock In</div>
+                                                                                    <div className="session-time-value in">{session.clockInTime}</div>
+                                                                                </div>
+                                                                                <div style={{color: '#ccc', fontSize: '24px'}}>→</div>
+                                                                                <div className="session-time-block">
+                                                                                    <div className="session-time-label">Clock Out</div>
+                                                                                    <div className={`session-time-value ${isOngoing ? 'ongoing' : 'out'}`}>
+                                                                                        {session.clockOutTime || 'Active'}
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className={`session-duration ${isOngoing ? 'ongoing' : ''}`}>
+                                                                                {session.durationFormatted || 'Ongoing...'}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {activityLog.length > rowsPerPage && (
+                        <div className="pagination">
+                            <div className="pagination-info">
+                                Showing <strong>{startIndex + 1}-{Math.min(endIndex, activityLog.length)}</strong> of <strong>{activityLog.length}</strong> activities (sorted by latest)
+                            </div>
+                            <div className="pagination-buttons">
+                                <button 
+                                    className="page-btn" 
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                >
+                                    ← Previous
+                                </button>
+                                {[...Array(Math.min(5, totalPages))].map((_, i) => (
+                                    <button
+                                        key={i + 1}
+                                        className={`page-btn ${currentPage === i + 1 ? 'active' : ''}`}
+                                        onClick={() => setCurrentPage(i + 1)}
+                                    >
+                                        {i + 1}
+                                    </button>
+                                ))}
+                                <button 
+                                    className="page-btn" 
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                >
+                                    Next →
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AttendanceDashboard />);
+    </script>
+</body>
+</html>
