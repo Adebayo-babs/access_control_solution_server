@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
+const { setupAuthRoutes, authenticateToken } = require('./auth');
 require('dotenv').config();
 
 const app = express();
@@ -13,10 +14,16 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Serve static files (HTML, CSS, JS)
+app.use(express.static(__dirname));
+
+// Serve login page as default route
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/login.html');
+});
+
 // MongoDB connection
 let db;
-// const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-
 const MONGODB_URI = "mongodb+srv://Adebayo_server:Welldone123@access-control-db.rabjklj.mongodb.net/?appName=access-control-db"
 const DB_NAME = 'access_control';
 
@@ -34,6 +41,11 @@ MongoClient.connect(MONGODB_URI)
     db.collection('access_logs').createIndex({ date: -1 });
     db.collection('attendance').createIndex({ lagId: 1, date: -1 });
     db.collection('attendance').createIndex({ date: -1 });
+    db.collection('admins').createIndex({ username: 1 }, { unique: true });
+    db.collection('admins').createIndex({ email: 1 }, { unique: true });
+    
+    // Setup authentication routes
+    setupAuthRoutes(app, db);
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
@@ -136,7 +148,7 @@ app.post('/api/profiles', async (req, res) => {
   try {
     const { name, lagId, faceTemplate, faceImage, thumbnail } = req.body;
 
-    console.log('\n NEW PROFILE REQUEST RECEIVED');
+    console.log('\n=== NEW PROFILE REQUEST RECEIVED ===');
     console.log(`Name: ${name}`);
     console.log(`LAG ID: ${lagId}`);
 
@@ -710,7 +722,7 @@ app.post('/api/attendance/clock', async (req, res) => {
       if (!attendance || !attendance.sessions || attendance.sessions.length === 0) {
         return res.status(400).json({
           success: false,
-          error: 'Please clock in'
+          error: 'Please clock in first'
         });
       }
 

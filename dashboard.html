@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Dashboard</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .logout-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+
+        .logout-btn:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 16px;
+            background: #f3f4f6;
+            border-radius: 12px;
+            margin-right: 12px;
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: #374151;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Auto-detect API URL based on current environment
+        const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+        const API_BASE_URL = isProduction 
+            ? 'https://access-control-solution-server.onrender.com/api'
+            : 'http://localhost:3000/api';
+        
+        console.log('Environment:', isProduction ? 'Production' : 'Local Development');
+        console.log('API URL:', API_BASE_URL);
+
+        function AttendanceDashboard() {
+            const [activityLog, setActivityLog] = useState([]);
+            const [filteredActivities, setFilteredActivities] = useState([]);
+            const [stats, setStats] = useState({ totalPresent: 0, activeNow: 0, clockedOut: 0 });
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [currentPage, setCurrentPage] = useState(1);
+            const [expandedSessions, setExpandedSessions] = useState({});
+            const [selectedDate, setSelectedDate] = useState('today');
+            const [currentDate, setCurrentDate] = useState('');
+            const [availableDates, setAvailableDates] = useState([]);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [currentUser, setCurrentUser] = useState(null);
+            const rowsPerPage = 5;
+
+            // Check authentication on mount
+            useEffect(() => {
+                checkAuth();
+            }, []);
+
+            useEffect(() => {
+                if (currentUser) {
+                    loadAvailableDates();
+                }
+            }, [currentUser]);
+
+            useEffect(() => {
+                if (currentUser) {
+                    fetchAttendanceData();
+                    const interval = setInterval(fetchAttendanceData, 600000);
+                    return () => clearInterval(interval);
+                }
+            }, [selectedDate, currentUser]);
+
+            // Filter activities based on search query
+            useEffect(() => {
+                if (!searchQuery.trim()) {
+                    setFilteredActivities(activityLog);
+                    setCurrentPage(1);
+                    return;
+                }
+
+                const query = searchQuery.toLowerCase().trim();
+                const filtered = activityLog.filter(activity => {
+                    const lagIdMatch = activity.lagId.toLowerCase().includes(query);
+                    const nameMatch = activity.name.toLowerCase().includes(query);
+                    return lagIdMatch || nameMatch;
+                });
+
+                setFilteredActivities(filtered);
+                setCurrentPage(1);
+            }, [searchQuery, activityLog]);
+
+            const checkAuth = async () => {
+                const token = localStorage.getItem('authToken');
+                
+                if (!token) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/auth/verify`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        setCurrentUser(data.admin);
+                    } else {
+                        localStorage.removeItem('authToken');
+                        localStorage.removeItem('adminUser');
+                        window.location.href = 'login.html';
+                    }
+                } catch (error) {
+                    console.error('Auth check failed:', error);
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('adminUser');
+                    window.location.href = 'login.html';
+                }
+            };
+
+            const handleLogout = async () => {
+                const token = localStorage.getItem('authToken');
+                
+                try {
+                    await fetch(`${API_BASE_URL}/auth/logout`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                } catch (error) {
+                    console.error('Logout error:', error);
+                }
+
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('adminUser');
+                window.location.href = 'login.html';
+            };
+
+            const loadAvailableDates = async () => {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/attendance`);
+                    const data = await response.json();
+                    
+                    if (data.success && data.records) {
+                        const dates = [...new Set(data.records.map(r => r.date))].sort().reverse();
+                        setAvailableDates(dates);
+                        
+                        const today = new Date().toISOString().split('T')[0];
+                        if (!dates.includes(today) && dates.length > 0) {
+                            setSelectedDate(dates[0]);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error loading dates:', err);
+                }
+            };
+
+            const fetchAttendanceData = async () => {
+                try {
+                    setLoading(true);
+                    setError(null);
+
+                    const targetDate = selectedDate === 'today' 
+                        ? new Date().toISOString().split('T')[0]
+                        : selectedDate;
+
+                    setCurrentDate(new Date(targetDate + 'T12:00:00').toLocaleDateString('en-US', { 
+                        weekday: 'long', 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                    }));
+
+                    const response = await fetch(
+                        `${API_BASE_URL}/attendance?startDate=${targetDate}&endDate=${targetDate}&limit=100`
+                    );
+                    
+                    const data = await response.json();
+
+                    if (data.success) {
+                        const staffMap = new Map();
+                        
+                        data.records.forEach(record => {
+                            if (record.sessions && record.sessions.length > 0) {
+                                let latestTimestamp = 0;
+                                let latestAction = 'clock-in';
+                                let latestTimeFormatted = '';
+                                
+                                record.sessions.forEach(session => {
+                                    if (session.clockIn > latestTimestamp) {
+                                        latestTimestamp = session.clockIn;
+                                        latestAction = 'clock-in';
+                                        latestTimeFormatted = session.clockInTime;
+                                    }
+                                    
+                                    if (session.clockOut && session.clockOut > latestTimestamp) {
+                                        latestTimestamp = session.clockOut;
+                                        latestAction = 'clock-out';
+                                        latestTimeFormatted = session.clockOutTime;
+                                    }
+                                });
+                                
+                                staffMap.set(record.lagId, {
+                                    timestamp: latestTimestamp,
+                                    timeFormatted: latestTimeFormatted,
+                                    lagId: record.lagId,
+                                    name: record.name,
+                                    action: latestAction,
+                                    sessions: record.sessions,
+                                    status: record.status,
+                                    totalDuration: record.totalDurationFormatted
+                                });
+                            }
+                        });
+
+                        const activities = Array.from(staffMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+                        setActivityLog(activities);
+                        setFilteredActivities(activities);
+                        
+                        const uniqueStaff = new Set(data.records.map(r => r.lagId));
+                        const activeStaff = data.records.filter(r => r.status === 'ACTIVE');
+                        const clockedOutStaff = data.records.filter(r => r.status === 'COMPLETED');
+                        
+                        setStats({
+                            totalPresent: uniqueStaff.size,
+                            activeNow: activeStaff.length,
+                            clockedOut: clockedOutStaff.length
+                        });
+                    } else {
+                        setError(data.error || 'Failed to fetch attendance data');
+                    }
+
+                    setLoading(false);
+                } catch (err) {
+                    console.error('Error fetching attendance:', err);
+                    setError('Failed to connect to server');
+                    setLoading(false);
+                }
+            };
+
+            const toggleSessions = (activityId) => {
+                setExpandedSessions(prev => ({
+                    ...prev,
+                    [activityId]: !prev[activityId]
+                }));
+            };
+
+            const totalPages = Math.ceil(filteredActivities.length / rowsPerPage);
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = startIndex + rowsPerPage;
+            const currentActivities = filteredActivities.slice(startIndex, endIndex);
+
+            if (loading) {
+                return (
+                    <div className="container">
+                        <div className="table-card">
+                            <div className="loading">
+                                <div style={{fontSize: '48px', marginBottom: '16px'}}>⏳</div>
+                                Loading attendance data...
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (error) {
+                return (
+                    <div className="container">
+                        <div className="table-card">
+                            <div className="error">
+                                <div style={{fontSize: '48px', marginBottom: '16px'}}>⚠️</div>
+                                {error}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <div className="header-top">
+                            <div className="header-title">
+                                <div className="header-icon">📊</div>
+                                <div className="header-text">
+                                    <h1>ACCESS CONTROL DASHBOARD</h1>
+                                    <p>{currentDate} • Last updated: {new Date().toLocaleTimeString()}</p>
+                                </div>
+                            </div>
+                            <div className="header-actions">
+                                {currentUser && (
+                                    <div className="user-info">
+                                        <div className="user-avatar">
+                                            {currentUser.username.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="user-name">{currentUser.username}</div>
+                                    </div>
+                                )}
+                                <select 
+                                    className="date-selector"
+                                    value={selectedDate}
+                                    onChange={(e) => setSelectedDate(e.target.value)}
+                                >
+                                    <option value="today">Today</option>
+                                    {availableDates.map(date => (
+                                        <option key={date} value={date}>
+                                            {new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
+                                                month: 'short',
+                                                day: 'numeric',
+                                                year: 'numeric'
+                                            })}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button className="refresh-btn" onClick={fetchAttendanceData}>
+                                    🔄 Refresh
+                                </button>
+                                <button className="logout-btn" onClick={handleLogout}>
+                                    🚪 Logout
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="stats-grid">
+                        <div className="stat-card present">
+                            <div className="stat-header">
+                                <div>
+                                    <div className="stat-label">Total Present</div>
+                                    <div className="stat-value">{stats.totalPresent}</div>
+                                </div>
+                                <div className="stat-icon-badge">👥</div>
+                            </div>
+                        </div>
+                        <div className="stat-card active">
+                            <div className="stat-header">
+                                <div>
+                                    <div className="stat-label">Currently in office</div>
+                                    <div className="stat-value">{stats.activeNow}</div>
+                                </div>
+                                <div className="stat-icon-badge">⏱️</div>
+                            </div>
+                        </div>
+                        <div className="stat-card completed">
+                            <div className="stat-header">
+                                <div>
+                                    <div className="stat-label">Clocked Out</div>
+                                    <div className="stat-value">{stats.clockedOut}</div>
+                                </div>
+                                <div className="stat-icon-badge">🚪</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="table-card">
+                        <div className="table-header">
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                <h2>Recent Activity</h2>
+                                <div style={{position: 'relative', width: '300px'}}>
+                                    <input
+                                        type="text"
+                                        placeholder="Search by LAG ID or Name..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '10px 40px 10px 16px',
+                                            border: '2px solid #e5e7eb',
+                                            borderRadius: '12px',
+                                            fontSize: '14px',
+                                            outline: 'none',
+                                            transition: 'all 0.2s'
+                                        }}
+                                        onFocus={(e) => {
+                                            e.target.style.borderColor = '#667eea';
+                                            e.target.style.boxShadow = '0 0 0 3px rgba(102, 126, 234, 0.1)';
+                                        }}
+                                        onBlur={(e) => {
+                                            e.target.style.borderColor = '#e5e7eb';
+                                            e.target.style.boxShadow = 'none';
+                                        }}
+                                    />
+                                    {searchQuery && (
+                                        <button
+                                            onClick={() => setSearchQuery('')}
+                                            style={{
+                                                position: 'absolute',
+                                                right: '12px',
+                                                top: '50%',
+                                                transform: 'translateY(-50%)',
+                                                background: 'none',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                color: '#9ca3af',
+                                                fontSize: '18px',
+                                                padding: '4px'
+                                            }}
+                                        >
+                                            ✕
+                                        </button>
+                                    )}
+                                    {!searchQuery && (
+                                        <span style={{
+                                            position: 'absolute',
+                                            right: '16px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            color: '#9ca3af',
+                                            pointerEvents: 'none'
+                                        }}>
+                                            🔍
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            {searchQuery && (
+                                <div style={{
+                                    marginTop: '12px',
+                                    fontSize: '13px',
+                                    color: '#6b7280'
+                                }}>
+                                    Found <strong style={{color: '#667eea'}}>{filteredActivities.length}</strong> result{filteredActivities.length !== 1 ? 's' : ''} for "{searchQuery}"
+                                </div>
+                            )}
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>LAG ID</th>
+                                    <th>Staff Member</th>
+                                    <th>Clock In</th>
+                                    <th>Clock Out</th>
+                                    <th>Sessions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {currentActivities.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="5">
+                                            <div className="empty-state">
+                                                <div className="empty-icon">{searchQuery ? '🔍' : '📭'}</div>
+                                                <div className="empty-title">
+                                                    {searchQuery ? 'No Results Found' : 'No Records Found'}
+                                                </div>
+                                                <div className="empty-text">
+                                                    {searchQuery ? (
+                                                        <>
+                                                            No staff members match "{searchQuery}"
+                                                            <div style={{marginTop: '8px'}}>
+                                                                <button
+                                                                    onClick={() => setSearchQuery('')}
+                                                                    style={{
+                                                                        background: '#667eea',
+                                                                        color: 'white',
+                                                                        border: 'none',
+                                                                        padding: '8px 16px',
+                                                                        borderRadius: '8px',
+                                                                        cursor: 'pointer',
+                                                                        fontSize: '13px',
+                                                                        fontWeight: '600'
+                                                                    }}
+                                                                >
+                                                                    Clear Search
+                                                                </button>
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            No attendance records for {selectedDate === 'today' ? 'today' : 'this date'}
+                                                            {availableDates.length > 0 && <div style={{marginTop: '8px'}}>Try selecting a different date</div>}
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    currentActivities.map((activity, index) => {
+                                        const isLatest = startIndex + index === 0;
+                                        const activityId = `${activity.lagId}-${activity.timestamp}`;
+                                        const latestSession = activity.sessions[activity.sessions.length - 1];
+
+                                        return (
+                                            <React.Fragment key={activityId}>
+                                                <tr className={isLatest ? 'latest-activity' : ''}>
+                                                    <td>
+                                                        <span className="lag-id">{activity.lagId}</span>
+                                                    </td>
+                                                    <td>
+                                                        <div className="name-cell">
+                                                            <div className={`status-dot ${activity.status.toLowerCase()}`}></div>
+                                                            <div className="name-info">
+                                                                <div className="name-primary">{activity.name}</div>
+                                                                <div className={`name-secondary ${activity.action}`}>
+                                                                    {activity.action === 'clock-in' ? '⏱️ Clocked in' : '✅ Clocked out'} at {activity.timeFormatted}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <span className="time-badge in">{latestSession.clockInTime}</span>
+                                                    </td>
+                                                    <td>
+                                                        <span className={`time-badge ${latestSession.clockOutTime ? 'out' : 'pending'}`}>
+                                                            {latestSession.clockOutTime || 'Active'}
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <div>
+                                                            <span 
+                                                                className={`sessions-badge ${activity.status.toLowerCase()}`}
+                                                                onClick={() => toggleSessions(activityId)}
+                                                            >
+                                                                {activity.sessions.length} Session{activity.sessions.length > 1 ? 's' : ''}
+                                                                <span className={`arrow-icon ${expandedSessions[activityId] ? 'rotated' : ''}`}>▼</span>
+                                                            </span>
+                                                            <div className="total-duration">
+                                                                Total: {activity.totalDuration}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {expandedSessions[activityId] && (
+                                                    <tr className="sessions-detail show">
+                                                        <td colSpan="5">
+                                                            <div className="sessions-content">
+                                                                <div className="sessions-title">
+                                                                    <span className="sessions-title-text">
+                                                                        📋 All Sessions for {activity.name} ({activity.lagId})
+                                                                    </span>
+                                                                    <span className="total-time-badge">
+                                                                        Total: {activity.totalDuration}
+                                                                    </span>
+                                                                </div>
+                                                                {activity.sessions.map((session, idx) => {
+                                                                    const isOngoing = !session.clockOut;
+                                                                    return (
+                                                                        <div key={idx} className="session-item">
+                                                                            <div className="session-number">Session {idx + 1}</div>
+                                                                            <div className="session-times">
+                                                                                <div className="session-time-block">
+                                                                                    <div className="session-time-label">Clock In</div>
+                                                                                    <div className="session-time-value in">{session.clockInTime}</div>
+                                                                                </div>
+                                                                                <div style={{color: '#d1d5db', fontSize: '20px'}}>→</div>
+                                                                                <div className="session-time-block">
+                                                                                    <div className="session-time-label">Clock Out</div>
+                                                                                    <div className={`session-time-value ${isOngoing ? 'ongoing' : 'out'}`}>
+                                                                                        {session.clockOutTime || 'Active'}
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className={`session-duration ${isOngoing ? 'ongoing' : ''}`}>
+                                                                                {session.durationFormatted || 'Ongoing...'}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+
+                        {filteredActivities.length > rowsPerPage && (
+                            <div className="pagination">
+                                <div className="pagination-info">
+                                    Showing <strong>{startIndex + 1}-{Math.min(endIndex, filteredActivities.length)}</strong> of <strong>{filteredActivities.length}</strong> records
+                                </div>
+                                <div className="pagination-buttons">
+                                    <button 
+                                        className="page-btn" 
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                    >
+                                        ← Previous
+                                    </button>
+                                    {[...Array(Math.min(5, totalPages))].map((_, i) => (
+                                        <button
+                                            key={i + 1}
+                                            className={`page-btn ${currentPage === i + 1 ? 'active' : ''}`}
+                                            onClick={() => setCurrentPage(i + 1)}
+                                        >
+                                            {i + 1}
+                                        </button>
+                                    ))}
+                                    <button 
+                                        className="page-btn" 
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                    >
+                                        Next →
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AttendanceDashboard />);
+    </script>
+</body>
+</html>

@@ -7,15 +7,21 @@
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": ["access-control", "api", "nodejs"],
+  "keywords": [
+    "access-control",
+    "api",
+    "nodejs"
+  ],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "body-parser": "^2.2.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.4",
     "multer": "^2.0.2"
   },
