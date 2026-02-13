@@ -18,6 +18,7 @@
             align-items: center;
             justify-content: center;
             padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
 
         .auth-container {
@@ -62,34 +63,6 @@
 
         .auth-body {
             padding: 40px 32px;
-        }
-
-        .tab-buttons {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 32px;
-            background: #f3f4f6;
-            padding: 6px;
-            border-radius: 12px;
-        }
-
-        .tab-btn {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            background: transparent;
-            color: #6b7280;
-            font-weight: 600;
-            font-size: 14px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .tab-btn.active {
-            background: white;
-            color: #667eea;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }
 
         .form-group {
@@ -189,15 +162,6 @@
             transform: none;
         }
 
-        .form-footer {
-            text-align: center;
-            margin-top: 24px;
-            padding-top: 24px;
-            border-top: 1px solid #e5e7eb;
-            font-size: 14px;
-            color: #6b7280;
-        }
-
         .loading-spinner {
             display: inline-block;
             width: 16px;
@@ -211,10 +175,6 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-
-        .hidden {
-            display: none;
-        }
     </style>
 </head>
 <body>
@@ -222,15 +182,10 @@
         <div class="auth-header">
             <div class="auth-icon">🔐</div>
             <h1>Access Control System</h1>
-            <p>Admin Dashboard</p>
+            <p>Admin Dashboard Login</p>
         </div>
 
         <div class="auth-body">
-            <div class="tab-buttons">
-                <button class="tab-btn active" onclick="switchTab('login')">Login</button>
-                <button class="tab-btn" onclick="switchTab('signup')">Sign Up</button>
-            </div>
-
             <div id="error-message" class="error-message"></div>
             <div id="success-message" class="success-message"></div>
 
@@ -268,59 +223,6 @@
                     Sign In
                 </button>
             </form>
-
-            <!-- Signup Form -->
-            <form id="signup-form" class="hidden">
-                <div class="form-group">
-                    <label for="signup-username">Username</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">👤</span>
-                        <input 
-                            type="text" 
-                            id="signup-username" 
-                            class="form-input" 
-                            placeholder="Choose a username"
-                            required
-                        >
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="signup-email">Email</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">📧</span>
-                        <input 
-                            type="email" 
-                            id="signup-email" 
-                            class="form-input" 
-                            placeholder="Enter your email"
-                            required
-                        >
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="signup-password">Password</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">🔑</span>
-                        <input 
-                            type="password" 
-                            id="signup-password" 
-                            class="form-input" 
-                            placeholder="Create a password (min 6 characters)"
-                            required
-                        >
-                    </div>
-                </div>
-
-                <button type="submit" class="submit-btn" id="signup-btn">
-                    Create Account
-                </button>
-            </form>
-
-            <!-- <div class="form-footer">
-                Secure authentication powered by JWT
-            </div> -->
         </div>
     </div>
 
@@ -333,27 +235,6 @@
         
         console.log('Environment:', isProduction ? 'Production' : 'Local Development');
         console.log('API URL:', API_BASE_URL);
-
-        // Switch between login and signup tabs
-        function switchTab(tab) {
-            const loginForm = document.getElementById('login-form');
-            const signupForm = document.getElementById('signup-form');
-            const tabButtons = document.querySelectorAll('.tab-btn');
-
-            hideMessages();
-
-            if (tab === 'login') {
-                loginForm.classList.remove('hidden');
-                signupForm.classList.add('hidden');
-                tabButtons[0].classList.add('active');
-                tabButtons[1].classList.remove('active');
-            } else {
-                loginForm.classList.add('hidden');
-                signupForm.classList.remove('hidden');
-                tabButtons[0].classList.remove('active');
-                tabButtons[1].classList.add('active');
-            }
-        }
 
         // Show error message
         function showError(message) {
@@ -410,7 +291,7 @@
                     localStorage.setItem('authToken', data.token);
                     localStorage.setItem('adminUser', JSON.stringify(data.admin));
 
-                    showSuccess('Login successful! Redirecting...');
+                    showSuccess('Login successful');
                     
                     // Redirect to dashboard
                     setTimeout(() => {
@@ -426,64 +307,6 @@
                 showError('Connection error. Please try again.');
                 loginBtn.disabled = false;
                 loginBtn.innerHTML = 'Sign In';
-            }
-        });
-
-        // Handle signup
-        document.getElementById('signup-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            hideMessages();
-
-            const username = document.getElementById('signup-username').value.trim();
-            const email = document.getElementById('signup-email').value.trim();
-            const password = document.getElementById('signup-password').value;
-            const signupBtn = document.getElementById('signup-btn');
-
-            if (!username || !email || !password) {
-                showError('Please fill in all fields');
-                return;
-            }
-
-            if (password.length < 6) {
-                showError('Password must be at least 6 characters');
-                return;
-            }
-
-            signupBtn.disabled = true;
-            signupBtn.innerHTML = '<span class="loading-spinner"></span> Creating account...';
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/auth/register`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username, email, password })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    // Store token in localStorage
-                    localStorage.setItem('authToken', data.token);
-                    localStorage.setItem('adminUser', JSON.stringify(data.admin));
-
-                    showSuccess('Account created! Redirecting...');
-                    
-                    // Redirect to dashboard
-                    setTimeout(() => {
-                        window.location.href = 'dashboard.html';
-                    }, 1000);
-                } else {
-                    showError(data.error || 'Registration failed');
-                    signupBtn.disabled = false;
-                    signupBtn.innerHTML = 'Create Account';
-                }
-            } catch (error) {
-                console.error('Signup error:', error);
-                showError('Connection error. Please try again.');
-                signupBtn.disabled = false;
-                signupBtn.innerHTML = 'Create Account';
             }
         });
 

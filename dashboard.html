@@ -31,6 +31,28 @@
             box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
         }
 
+        .create-user-btn {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .create-user-btn:hover {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
+
         .user-info {
             display: flex;
             align-items: center;
@@ -88,6 +110,7 @@
             const [availableDates, setAvailableDates] = useState([]);
             const [searchQuery, setSearchQuery] = useState('');
             const [currentUser, setCurrentUser] = useState(null);
+            const [showCreateUserModal, setShowCreateUserModal] = useState(false);
             const rowsPerPage = 5;
 
             // Check authentication on mount
@@ -177,6 +200,209 @@
                 localStorage.removeItem('authToken');
                 localStorage.removeItem('adminUser');
                 window.location.href = 'login.html';
+            };
+
+            const handleCreateUser = async (e) => {
+                e.preventDefault();
+                const token = localStorage.getItem('authToken');
+                
+                const username = e.target.username.value.trim();
+                const email = e.target.email.value.trim();
+                const password = e.target.password.value;
+
+                if (password.length < 6) {
+                    alert('Password must be at least 6 characters');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/auth/create-user`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ username, email, password })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        alert('User created successfully!');
+                        setShowCreateUserModal(false);
+                        e.target.reset();
+                    } else {
+                        alert(data.error || 'Failed to create user');
+                    }
+                } catch (error) {
+                    console.error('Create user error:', error);
+                    alert('Connection error. Please try again.');
+                }
+            };
+
+            const CreateUserModal = () => {
+                if (!showCreateUserModal) return null;
+
+                return (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 1000
+                    }}>
+                        <div style={{
+                            background: 'white',
+                            borderRadius: '24px',
+                            padding: '32px',
+                            width: '90%',
+                            maxWidth: '440px',
+                            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                        }}>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: '24px'
+                            }}>
+                                <h2 style={{
+                                    fontSize: '24px',
+                                    fontWeight: '700',
+                                    color: '#1a1a2e'
+                                }}>Create New User</h2>
+                                <button
+                                    onClick={() => setShowCreateUserModal(false)}
+                                    style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        fontSize: '24px',
+                                        cursor: 'pointer',
+                                        color: '#6b7280',
+                                        padding: '4px 8px'
+                                    }}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            <form onSubmit={handleCreateUser}>
+                                <div style={{ marginBottom: '20px' }}>
+                                    <label style={{
+                                        display: 'block',
+                                        color: '#374151',
+                                        fontWeight: '600',
+                                        fontSize: '14px',
+                                        marginBottom: '8px'
+                                    }}>Username</label>
+                                    <input
+                                        type="text"
+                                        name="username"
+                                        placeholder="Enter username"
+                                        required
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px 16px',
+                                            border: '2px solid #e5e7eb',
+                                            borderRadius: '12px',
+                                            fontSize: '15px',
+                                            outline: 'none'
+                                        }}
+                                    />
+                                </div>
+
+                                <div style={{ marginBottom: '20px' }}>
+                                    <label style={{
+                                        display: 'block',
+                                        color: '#374151',
+                                        fontWeight: '600',
+                                        fontSize: '14px',
+                                        marginBottom: '8px'
+                                    }}>Email</label>
+                                    <input
+                                        type="email"
+                                        name="email"
+                                        placeholder="Enter email"
+                                        required
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px 16px',
+                                            border: '2px solid #e5e7eb',
+                                            borderRadius: '12px',
+                                            fontSize: '15px',
+                                            outline: 'none'
+                                        }}
+                                    />
+                                </div>
+
+                                <div style={{ marginBottom: '24px' }}>
+                                    <label style={{
+                                        display: 'block',
+                                        color: '#374151',
+                                        fontWeight: '600',
+                                        fontSize: '14px',
+                                        marginBottom: '8px'
+                                    }}>Password</label>
+                                    <input
+                                        type="password"
+                                        name="password"
+                                        placeholder="Enter password (min 6 characters)"
+                                        required
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px 16px',
+                                            border: '2px solid #e5e7eb',
+                                            borderRadius: '12px',
+                                            fontSize: '15px',
+                                            outline: 'none'
+                                        }}
+                                    />
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '12px' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowCreateUserModal(false)}
+                                        style={{
+                                            flex: 1,
+                                            padding: '14px',
+                                            background: '#f3f4f6',
+                                            color: '#374151',
+                                            border: 'none',
+                                            borderRadius: '12px',
+                                            fontWeight: '600',
+                                            fontSize: '15px',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        style={{
+                                            flex: 1,
+                                            padding: '14px',
+                                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '12px',
+                                            fontWeight: '600',
+                                            fontSize: '15px',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
+                                        }}
+                                    >
+                                        Create User
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                );
             };
 
             const loadAvailableDates = async () => {
@@ -321,6 +547,7 @@
 
             return (
                 <div className="container">
+                    <CreateUserModal />
                     <div className="header">
                         <div className="header-top">
                             <div className="header-title">
@@ -358,6 +585,9 @@
                                 <button className="refresh-btn" onClick={fetchAttendanceData}>
                                     🔄 Refresh
                                 </button>
+                                <button className="create-user-btn" onClick={() => setShowCreateUserModal(true)}>
+                                    👤 Create User
+                                </button>
                                 <button className="logout-btn" onClick={handleLogout}>
                                     🚪 Logout
                                 </button>
@@ -378,7 +608,7 @@
                         <div className="stat-card active">
                             <div className="stat-header">
                                 <div>
-                                    <div className="stat-label">Currently in office</div>
+                                    <div className="stat-label">Currently Active</div>
                                     <div className="stat-value">{stats.activeNow}</div>
                                 </div>
                                 <div className="stat-icon-badge">⏱️</div>
@@ -387,7 +617,7 @@
                         <div className="stat-card completed">
                             <div className="stat-header">
                                 <div>
-                                    <div className="stat-label">Out of office.</div>
+                                    <div className="stat-label">Clocked Out</div>
                                     <div className="stat-value">{stats.clockedOut}</div>
                                 </div>
                                 <div className="stat-icon-badge">🚪</div>

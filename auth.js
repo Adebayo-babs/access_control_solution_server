@@ -33,7 +33,7 @@ const authenticateToken = (req, res, next) => {
 // Setup authentication routes
 const setupAuthRoutes = (app, db) => {
   
-  // Register new admin
+  // Register new admin (keep this for initial setup, but can be disabled in production)
   app.post('/api/auth/register', async (req, res) => {
     try {
       const { username, email, password } = req.body;
@@ -107,6 +107,75 @@ const setupAuthRoutes = (app, db) => {
       res.status(500).json({ 
         success: false, 
         error: 'Server error during registration' 
+      });
+    }
+  });
+
+  // Create new user (authenticated admins only)
+  app.post('/api/auth/create-user', authenticateToken, async (req, res) => {
+    try {
+      const { username, email, password } = req.body;
+
+      // Validation
+      if (!username || !email || !password) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'All fields are required' 
+        });
+      }
+
+      if (password.length < 6) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Password must be at least 6 characters' 
+        });
+      }
+
+      // Check if user already exists
+      const existingUser = await db.collection('admins').findOne({ 
+        $or: [{ email }, { username }] 
+      });
+
+      if (existingUser) {
+        return res.status(409).json({ 
+          success: false, 
+          error: 'Username or email already exists' 
+        });
+      }
+
+      // Hash password
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+
+      // Create user
+      const user = {
+        username,
+        email,
+        password: hashedPassword,
+        createdBy: req.user.id,
+        createdAt: new Date(),
+        lastLogin: null
+      };
+
+      const result = await db.collection('admins').insertOne(user);
+
+      console.log(`New user created by ${req.user.username}: ${username}`);
+
+      res.status(201).json({
+        success: true,
+        message: 'User created successfully',
+        user: {
+          id: result.insertedId.toString(),
+          username,
+          email
+        }
+      });
+
+    } catch (error) {
+      console.error('Create user error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Server error during user creation' 
       });
     }
   });
