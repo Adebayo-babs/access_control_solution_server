@@ -24,6 +24,7 @@ app.get('/', (req, res) => {
 
 // MongoDB connection
 let db;
+let sseClients = [];
 const MONGODB_URI = "mongodb+srv://Adebayo_server:Welldone123@access-control-db.rabjklj.mongodb.net/?appName=access-control-db"
 const DB_NAME = 'access_control';
 
@@ -204,6 +205,39 @@ app.post('/api/profiles', async (req, res) => {
     });
   }
 });
+
+// Server Sent Events for real-time updates
+app.get('/api/attendance/stream', (req, res) => {
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders();
+
+  // Send initial message to establish connection
+  res.write(`data: {"type": "connection-established"}\n\n`);
+
+  // Keep the connection alive with periodic pings every 30 seconds
+  const pingInterval = setInterval(() => {
+    res.write(`data: {"type": "heartbeat"}\n\n`);
+  }, 30000);
+
+  // Add client to list
+  sseClients.push(res);
+
+  // Remove client on close
+  req.on('close', () => {
+    clearInterval(pingInterval);
+    sseClients = sseClients.filter(client => client !== res);
+  });
+});
+
+// Healper function to send SSE updates
+const broadcastAttendanceUpdate = (update) => {
+  const message = `data: ${JSON.stringify({ type: 'attendance-update', update })}\n\n`;
+  sseClients.forEach(client => client.write(message));
+}
 
 // Get All Profiles
 app.get('/api/profiles', async (req, res) => {
@@ -779,6 +813,8 @@ app.post('/api/attendance/clock', async (req, res) => {
     // Fetch updated record
     const updatedAttendance = await db.collection('attendance').findOne({ lagId, date: today });
 
+
+    broadcastAttendanceUpdate();
     res.json({
       success: true,
       message: `Clocked ${action.toLowerCase()} successfully`,

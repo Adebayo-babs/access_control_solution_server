@@ -114,10 +114,10 @@ const setupAuthRoutes = (app, db) => {
   // Create new user (authenticated admins only)
   app.post('/api/auth/create-user', authenticateToken, async (req, res) => {
     try {
-      const { username, email, password } = req.body;
+      const { username, lagId, email, password } = req.body;
 
       // Validation
-      if (!username || !email || !password) {
+      if (!username || !lagId || !email || !password) {
         return res.status(400).json({ 
           success: false, 
           error: 'All fields are required' 
@@ -131,15 +131,18 @@ const setupAuthRoutes = (app, db) => {
         });
       }
 
-      // Check if user already exists
+      // Check if user already exists (username, email, or lagId)
       const existingUser = await db.collection('admins').findOne({ 
-        $or: [{ email }, { username }] 
+        $or: [{ email }, { username }, { lagId: lagId.toUpperCase() }] 
       });
 
       if (existingUser) {
+        const conflict = existingUser.username === username ? 'Username'
+          : existingUser.email === email ? 'Email'
+          : 'LAG ID';
         return res.status(409).json({ 
           success: false, 
-          error: 'Username or email already exists' 
+          error: `${conflict} already exists` 
         });
       }
 
@@ -150,6 +153,7 @@ const setupAuthRoutes = (app, db) => {
       // Create user
       const user = {
         username,
+        lagId: lagId.toUpperCase(),
         email,
         password: hashedPassword,
         createdBy: req.user.id,
@@ -159,7 +163,7 @@ const setupAuthRoutes = (app, db) => {
 
       const result = await db.collection('admins').insertOne(user);
 
-      console.log(`New user created by ${req.user.username}: ${username}`);
+      console.log(`New user created by ${req.user.username}: ${username} (${lagId})`);
 
       res.status(201).json({
         success: true,
@@ -167,6 +171,7 @@ const setupAuthRoutes = (app, db) => {
         user: {
           id: result.insertedId.toString(),
           username,
+          lagId: lagId.toUpperCase(),
           email
         }
       });
