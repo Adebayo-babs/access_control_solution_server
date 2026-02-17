@@ -81,6 +81,10 @@
             color: #374151;
             font-size: 14px;
         }
+
+        /* <button className="refresh-btn" onClick={fetchAttendanceData}>
+                                    🔄 Refresh
+                                </button> */
     </style>
 </head>
 <body>
@@ -625,9 +629,7 @@
                                         </option>
                                     ))}
                                 </select>
-                                <button className="refresh-btn" onClick={fetchAttendanceData}>
-                                    🔄 Refresh
-                                </button>
+                                
                                 <button className="create-user-btn" onClick={() => setShowCreateUserModal(true)}>
                                     👤 Create User
                                 </button>
