@@ -458,10 +458,13 @@
                     const data = await response.json();
                     
                     if (data.success && data.records) {
-                        const dates = [...new Set(data.records.map(r => r.date))].sort().reverse();
+                        const today = new Date().toISOString().split('T')[0];
+                        const dates = [...new Set(data.records.map(r => r.date))]
+                        .filter(date => date !== today)
+                        .sort()
+                        .reverse();
                         setAvailableDates(dates);
                         
-                        const today = new Date().toISOString().split('T')[0];
                         if (!dates.includes(today) && dates.length > 0) {
                             setSelectedDate(dates[0]);
                         }
