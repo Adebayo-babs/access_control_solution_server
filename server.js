@@ -7,7 +7,7 @@ const { setupAuthRoutes, authenticateToken } = require('./auth');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 
 // Middleware
 app.use(cors());
@@ -25,8 +25,8 @@ app.get('/', (req, res) => {
 // MongoDB connection
 let db;
 let sseClients = [];
-const MONGODB_URI = "mongodb+srv://Adebayo_server:Welldone123@access-control-db.rabjklj.mongodb.net/?appName=access-control-db"
-const DB_NAME = 'access_control';
+const MONGODB_URI = process.env.MONGODB_URI;
+const DB_NAME = process.env.DB_NAME;
 
 MongoClient.connect(MONGODB_URI)
   .then(client => {

@@ -2,9 +2,10 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { ObjectId } = require('mongodb');
+require('dotenv').config();
 
 // Secret key for JWT - In production, use environment variable
-const JWT_SECRET = process.env.JWT_SECRET || 'mySuperSecretKeyThatIsVeryLong12345';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
