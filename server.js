@@ -147,7 +147,7 @@ const checkFaceDuplicate = async (faceTemplate) => {
 // Save/Create Profile with duplicate checks
 app.post('/api/profiles', async (req, res) => {
   try {
-    const { name, lagId, faceTemplate, faceImage, thumbnail } = req.body;
+    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
 
     console.log('\n=== NEW PROFILE REQUEST RECEIVED ===');
     console.log(`Name: ${name}`);
@@ -182,6 +182,7 @@ app.post('/api/profiles', async (req, res) => {
       faceTemplate: convertBinaryData(faceTemplate),
       faceImage: convertBinaryData(faceImage),
       thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
+      fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
       timestamp: Date.now(),
       createdAt: new Date(),
       updatedAt: new Date()
@@ -377,6 +378,7 @@ app.get('/api/profiles/lagid/:lagId', async (req, res) => {
         faceTemplate: profile.faceTemplate ? profile.faceTemplate.toString('base64') : null,
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
+        fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
         timestamp: profile.timestamp
       }
     });
@@ -415,6 +417,7 @@ app.get('/api/profiles/:id', async (req, res) => {
         faceTemplate: profile.faceTemplate ? profile.faceTemplate.toString('base64') : null,
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
+        fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
         timestamp: profile.timestamp
       }
     });
