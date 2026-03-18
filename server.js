@@ -241,23 +241,81 @@ const broadcastAttendanceUpdate = (update) => {
 }
 
 // Get All Profiles
+// app.get('/api/profiles', async (req, res) => {
+//   try {
+//     const { includeImages = 'true', includeThumbnails = 'true' } = req.query;
+
+//     const projection = {
+//       name: 1,
+//       lagId: 1,
+//       faceTemplate: 1,
+//       thumbnail: 1,
+//       timestamp: 1,
+//       createdAt: 1,
+//       updatedAt: 1,
+//       fingerprintTemplate: 1
+//     };
+
+//     // Include images
+//     // if (includeThumbnails === 'true') {
+//     //   projection.thumbnail = 1;
+//     // }
+
+//     if (includeImages === 'true') {
+//       projection.faceImage = 1;
+//     }
+
+//     const profiles = await db.collection('profiles')
+//       .find({})
+//       .project(projection)
+//       .sort({ name: 1 })
+//       .toArray();
+
+//     const total = profiles.length;
+
+//     // Convert binary data to base64 for transmission
+//     const formattedProfiles = profiles.map(profile => ({
+//       id: profile._id.toString(),
+//       name: profile.name,
+//       lagId: profile.lagId,
+//       faceTemplate: profile.faceTemplate ? profile.faceTemplate.toString('base64') : null,
+//       faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
+//       thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
+//       timestamp: profile.timestamp,
+//       createdAt: profile.createdAt,
+//       updatedAt: profile.updatedAt
+//     }));
+
+//     res.json({
+//       success: true,
+//       profiles: formattedProfiles,
+//       total,
+//       serverTimestamp: Date.now()
+//     });
+
+//   } catch (error) {
+//     console.error('Error fetching profiles:', error);
+//     res.status(500).json({ 
+//       success: false, 
+//       error: error.message 
+//     });
+//   }
+// });
 app.get('/api/profiles', async (req, res) => {
   try {
-    const { includeImages = 'false', includeThumbnails = 'true' } = req.query;
+    const { includeImages = 'true', includeThumbnails = 'true' } = req.query;
 
     const projection = {
       name: 1,
       lagId: 1,
       faceTemplate: 1,
+      thumbnail: 1,
       timestamp: 1,
       createdAt: 1,
-      updatedAt: 1
+      updatedAt: 1,
+      fingerprintTemplate: 1  
     };
 
-    // Include images
-    if (includeThumbnails === 'true') {
-      projection.thumbnail = 1;
-    }
     if (includeImages === 'true') {
       projection.faceImage = 1;
     }
@@ -268,16 +326,14 @@ app.get('/api/profiles', async (req, res) => {
       .sort({ name: 1 })
       .toArray();
 
-    const total = profiles.length;
-
-    // Convert binary data to base64 for transmission
     const formattedProfiles = profiles.map(profile => ({
       id: profile._id.toString(),
       name: profile.name,
       lagId: profile.lagId,
-      faceTemplate: profile.faceTemplate ? profile.faceTemplate.toString('base64') : null,
-      faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
-      thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
+      faceTemplate: profile.faceTemplate?.toString('base64') ?? null,
+      faceImage: profile.faceImage?.toString('base64') ?? null,
+      thumbnail: profile.thumbnail?.toString('base64') ?? null,
+      fingerprintTemplate: profile.fingerprintTemplate?.toString('base64') ?? null,
       timestamp: profile.timestamp,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt
@@ -286,16 +342,12 @@ app.get('/api/profiles', async (req, res) => {
     res.json({
       success: true,
       profiles: formattedProfiles,
-      total,
+      total: profiles.length,
       serverTimestamp: Date.now()
     });
 
   } catch (error) {
-    console.error('Error fetching profiles:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
