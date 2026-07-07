@@ -92,9 +92,14 @@ const calculateTemplateSimilarity = (template1, template2) => {
 };
 
 // More accurate duplicate detection
-const checkFaceDuplicate = async (faceTemplate) => {
+const checkFaceDuplicate = async (faceTemplate, excludeProfileId = null) => {
   try {
-    const allProfiles = await db.collection('profiles').find({}).toArray();
+    const query = {};
+    if (excludeProfileId) {
+      query._id = { $ne: new ObjectId(excludeProfileId) };
+    }
+
+    const allProfiles = await db.collection('profiles').find(query).toArray();
     const newTemplate = convertBinaryData(faceTemplate);
 
     console.log(`Checking face template against ${allProfiles.length} profiles`);
@@ -203,6 +208,104 @@ app.post('/api/profiles', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message 
+    });
+  }
+});
+
+// Update Profile (edit an existing profile's name, LAG ID, face, and/or fingerprint)
+app.put('/api/profiles/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
+
+    console.log('\n=== UPDATE PROFILE REQUEST RECEIVED ===');
+    console.log(`Profile ID: ${id}`);
+    console.log(`Name: ${name}`);
+    console.log(`LAG ID: ${lagId}`);
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid profile id'
+      });
+    }
+
+    // Validate required fields
+    if (!name || !lagId || !faceTemplate || !faceImage) {
+      console.log('Missing required fields');
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields'
+      });
+    }
+
+    const objectId = new ObjectId(id);
+
+    const existingProfile = await db.collection('profiles').findOne({ _id: objectId });
+    if (!existingProfile) {
+      return res.status(404).json({
+        success: false,
+        error: 'Profile not found'
+      });
+    }
+
+    // Check for duplicate LAG ID, excluding this profile itself
+    const lagIdConflict = await db.collection('profiles').findOne({
+      lagId,
+      _id: { $ne: objectId }
+    });
+    if (lagIdConflict) {
+      console.log(`Duplicate LAG ID found: ${lagIdConflict.name}`);
+      return res.status(409).json({
+        success: false,
+        error: `LAG ID '${lagId}' is already registered to ${lagIdConflict.name}`,
+        duplicateType: 'LAG_ID'
+      });
+    }
+
+    // Check for duplicate face, excluding this profile itself
+    const faceDuplicateResult = await checkFaceDuplicate(faceTemplate, id);
+    if (faceDuplicateResult.isDuplicate) {
+      console.log(`Duplicate face found: ${faceDuplicateResult.profile.name}`);
+      return res.status(409).json({
+        success: false,
+        error: `This face is already registered as ${faceDuplicateResult.profile.name}`,
+        duplicateType: 'FACE'
+      });
+    }
+
+    console.log('No conflicts found. Updating profile...');
+
+    const update = {
+      name,
+      lagId,
+      faceTemplate: convertBinaryData(faceTemplate),
+      faceImage: convertBinaryData(faceImage),
+      thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
+      fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
+      updatedAt: new Date()
+      // Note: `timestamp`/`createdAt` are intentionally left untouched so the
+      // profile's original "added on" date doesn't change on an edit.
+    };
+
+    await db.collection('profiles').updateOne(
+      { _id: objectId },
+      { $set: update }
+    );
+
+    console.log(`Profile updated successfully: ${id}`);
+
+    res.json({
+      success: true,
+      profileId: id,
+      message: 'Profile updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
