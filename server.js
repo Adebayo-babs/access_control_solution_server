@@ -212,26 +212,21 @@ app.post('/api/profiles', async (req, res) => {
   }
 });
 
-// Update Profile (edit an existing profile's name, LAG ID, face, and/or fingerprint)
-app.put('/api/profiles/:id', async (req, res) => {
+// Update Profile by LAG ID (edit an existing profile's name, LAG ID, face, and/or fingerprint).
+// Uses LAG ID rather than the Mongo _id because the Android app's local Room database
+// has its own separate auto-incrementing id that was never linked back to the Mongo _id.
+app.put('/api/profiles/lagid/:lagId', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
+    const { lagId: currentLagId } = req.params; // identifies the record to update
+    const { name, lagId: newLagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
 
     console.log('\n=== UPDATE PROFILE REQUEST RECEIVED ===');
-    console.log(`Profile ID: ${id}`);
+    console.log(`Current LAG ID: ${currentLagId}`);
     console.log(`Name: ${name}`);
-    console.log(`LAG ID: ${lagId}`);
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid profile id'
-      });
-    }
+    console.log(`New LAG ID: ${newLagId}`);
 
     // Validate required fields
-    if (!name || !lagId || !faceTemplate || !faceImage) {
+    if (!name || !newLagId || !faceTemplate || !faceImage) {
       console.log('Missing required fields');
       return res.status(400).json({
         success: false,
@@ -239,9 +234,7 @@ app.put('/api/profiles/:id', async (req, res) => {
       });
     }
 
-    const objectId = new ObjectId(id);
-
-    const existingProfile = await db.collection('profiles').findOne({ _id: objectId });
+    const existingProfile = await db.collection('profiles').findOne({ lagId: currentLagId });
     if (!existingProfile) {
       return res.status(404).json({
         success: false,
@@ -249,22 +242,21 @@ app.put('/api/profiles/:id', async (req, res) => {
       });
     }
 
-    // Check for duplicate LAG ID, excluding this profile itself
-    const lagIdConflict = await db.collection('profiles').findOne({
-      lagId,
-      _id: { $ne: objectId }
-    });
-    if (lagIdConflict) {
-      console.log(`Duplicate LAG ID found: ${lagIdConflict.name}`);
-      return res.status(409).json({
-        success: false,
-        error: `LAG ID '${lagId}' is already registered to ${lagIdConflict.name}`,
-        duplicateType: 'LAG_ID'
-      });
+    // Check for a LAG ID conflict only if it's actually changing, excluding this profile itself
+    if (newLagId !== currentLagId) {
+      const lagIdConflict = await db.collection('profiles').findOne({ lagId: newLagId });
+      if (lagIdConflict) {
+        console.log(`Duplicate LAG ID found: ${lagIdConflict.name}`);
+        return res.status(409).json({
+          success: false,
+          error: `LAG ID '${newLagId}' is already registered to ${lagIdConflict.name}`,
+          duplicateType: 'LAG_ID'
+        });
+      }
     }
 
     // Check for duplicate face, excluding this profile itself
-    const faceDuplicateResult = await checkFaceDuplicate(faceTemplate, id);
+    const faceDuplicateResult = await checkFaceDuplicate(faceTemplate, existingProfile._id.toString());
     if (faceDuplicateResult.isDuplicate) {
       console.log(`Duplicate face found: ${faceDuplicateResult.profile.name}`);
       return res.status(409).json({
@@ -278,7 +270,7 @@ app.put('/api/profiles/:id', async (req, res) => {
 
     const update = {
       name,
-      lagId,
+      lagId: newLagId,
       faceTemplate: convertBinaryData(faceTemplate),
       faceImage: convertBinaryData(faceImage),
       thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
@@ -289,15 +281,15 @@ app.put('/api/profiles/:id', async (req, res) => {
     };
 
     await db.collection('profiles').updateOne(
-      { _id: objectId },
+      { _id: existingProfile._id },
       { $set: update }
     );
 
-    console.log(`Profile updated successfully: ${id}`);
+    console.log(`Profile updated successfully: ${existingProfile._id}`);
 
     res.json({
       success: true,
-      profileId: id,
+      profileId: existingProfile._id.toString(),
       message: 'Profile updated successfully'
     });
 
