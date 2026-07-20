@@ -150,7 +150,7 @@ const checkFaceDuplicate = async (faceTemplate, excludeProfileId = null) => {
 // API Routes
 
 // Save/Create Profile with duplicate checks
-app.post('/api/profiles', async (req, res) => {
+app.post('/api/profiles', authenticateToken, async (req, res) => {
   try {
     const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
 
@@ -215,7 +215,7 @@ app.post('/api/profiles', async (req, res) => {
 // Update Profile by LAG ID (edit an existing profile's name, LAG ID, face, and/or fingerprint).
 // Uses LAG ID rather than the Mongo _id because the Android app's local Room database
 // has its own separate auto-incrementing id that was never linked back to the Mongo _id.
-app.put('/api/profiles/lagid/:lagId', async (req, res) => {
+app.put('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
   try {
     const { lagId: currentLagId } = req.params; // identifies the record to update
     const { name, lagId: newLagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
@@ -579,7 +579,7 @@ app.get('/api/profiles/:id', async (req, res) => {
 });
 
 // Delete Profile
-app.delete('/api/profiles/:id', async (req, res) => {
+app.delete('/api/profiles/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -609,7 +609,7 @@ app.delete('/api/profiles/:id', async (req, res) => {
 });
 
 // Delete Profile by LAG ID
-app.delete('/api/profiles/lagid/:lagId', async (req, res) => {
+app.delete('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
   try {
     const { lagId } = req.params;
 
@@ -653,7 +653,7 @@ app.get('/api/profiles/stats/count', async (req, res) => {
 });
 
 // Clear all profiles (for testing)
-app.delete('/api/profiles/admin/clear-all', async (req, res) => {
+app.delete('/api/profiles/admin/clear-all', authenticateToken, async (req, res) => {
   try {
     const result = await db.collection('profiles').deleteMany({});
     console.log(`Cleared ${result.deletedCount} profiles from database`);
