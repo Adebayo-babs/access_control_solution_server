@@ -35,6 +35,7 @@ MongoClient.connect(MONGODB_URI)
     
     // Create indexes
     db.collection('profiles').createIndex({ lagId: 1 }, { unique: true });
+    db.collection('profiles').createIndex({ qrCode: 1 }, { unique: true, sparse: true });
     db.collection('profiles').createIndex({ timestamp: -1 });
     db.collection('profiles').createIndex({ updatedAt: -1 });
     db.collection('access_logs').createIndex({ timestamp: -1 });
@@ -152,7 +153,7 @@ const checkFaceDuplicate = async (faceTemplate, excludeProfileId = null) => {
 // Save/Create Profile with duplicate checks
 app.post('/api/profiles', authenticateToken, async (req, res) => {
   try {
-    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
+    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate, qrCode } = req.body;
 
     console.log('\n=== NEW PROFILE REQUEST RECEIVED ===');
     console.log(`Name: ${name}`);
@@ -178,6 +179,19 @@ app.post('/api/profiles', authenticateToken, async (req, res) => {
       });
     }
 
+    // Check for duplicate QR code
+    if (qrCode) {
+      const existingQrCode = await db.collection('profiles').findOne({ qrCode });
+      if (existingQrCode) {
+        console.log(`Duplicate QR code found: ${existingQrCode.name}`);
+        return res.status(409).json({
+          success: false,
+          error: `This QR code is already registered to ${existingQrCode.name}`,
+          duplicateType: 'QR_CODE'
+        });
+      }
+    }
+
     console.log('No duplicates found. Saving profile...');
 
     // Convert base64 strings to binary
@@ -188,6 +202,7 @@ app.post('/api/profiles', authenticateToken, async (req, res) => {
       faceImage: convertBinaryData(faceImage),
       thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
       fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
+      qrCode: qrCode || null,
       timestamp: Date.now(),
       createdAt: new Date(),
       updatedAt: new Date()
@@ -218,7 +233,7 @@ app.post('/api/profiles', authenticateToken, async (req, res) => {
 app.put('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
   try {
     const { lagId: currentLagId } = req.params; // identifies the record to update
-    const { name, lagId: newLagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
+    const { name, lagId: newLagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate, qrCode } = req.body;
 
     console.log('\n=== UPDATE PROFILE REQUEST RECEIVED ===');
     console.log(`Current LAG ID: ${currentLagId}`);
@@ -255,6 +270,22 @@ app.put('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
       }
     }
 
+    // Check for a QR code conflict, excluding this profile itself
+    if (qrCode && qrCode !== existingProfile.qrCode) {
+      const qrConflict = await db.collection('profiles').findOne({
+        qrCode,
+        _id: { $ne: existingProfile._id }
+      });
+      if (qrConflict) {
+        console.log(`Duplicate QR code found: ${qrConflict.name}`);
+        return res.status(409).json({
+          success: false,
+          error: `This QR code is already registered to ${qrConflict.name}`,
+          duplicateType: 'QR_CODE'
+        });
+      }
+    }
+
     // Check for duplicate face, excluding this profile itself
     const faceDuplicateResult = await checkFaceDuplicate(faceTemplate, existingProfile._id.toString());
     if (faceDuplicateResult.isDuplicate) {
@@ -275,6 +306,7 @@ app.put('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
       faceImage: convertBinaryData(faceImage),
       thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
       fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
+      qrCode: qrCode || existingProfile.qrCode || null,
       updatedAt: new Date()
       // Note: `timestamp`/`createdAt` are intentionally left untouched so the
       // profile's original "added on" date doesn't change on an edit.
@@ -408,7 +440,8 @@ app.get('/api/profiles', async (req, res) => {
       timestamp: 1,
       createdAt: 1,
       updatedAt: 1,
-      fingerprintTemplate: 1  
+      fingerprintTemplate: 1,
+      qrCode: 1
     };
 
     if (includeImages === 'true') {
@@ -429,6 +462,7 @@ app.get('/api/profiles', async (req, res) => {
       faceImage: profile.faceImage?.toString('base64') ?? null,
       thumbnail: profile.thumbnail?.toString('base64') ?? null,
       fingerprintTemplate: profile.fingerprintTemplate?.toString('base64') ?? null,
+      qrCode: profile.qrCode ?? null,
       timestamp: profile.timestamp,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt
@@ -526,6 +560,7 @@ app.get('/api/profiles/lagid/:lagId', async (req, res) => {
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
         fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
+        qrCode: profile.qrCode ?? null,
         timestamp: profile.timestamp
       }
     });
@@ -565,6 +600,7 @@ app.get('/api/profiles/:id', async (req, res) => {
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
         fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
+        qrCode: profile.qrCode ?? null,
         timestamp: profile.timestamp
       }
     });
