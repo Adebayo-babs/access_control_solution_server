@@ -1,9 +1,10 @@
 // server.js
 const express = require('express');
+const crypto = require('crypto');
 const multer = require('multer');
 const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
-const { setupAuthRoutes, authenticateToken } = require('./auth');
+const { setupAuthRoutes, authenticateToken, verifyToken } = require('./auth');
 require('dotenv').config();
 
 const app = express();
@@ -25,6 +26,7 @@ app.get('/', (req, res) => {
 // MongoDB connection
 let db;
 let sseClients = [];
+let accessStreamClients = []; // Gate Monitor screens (gate.html)
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.DB_NAME;
 
@@ -35,12 +37,19 @@ MongoClient.connect(MONGODB_URI)
     
     // Create indexes
     db.collection('profiles').createIndex({ lagId: 1 }, { unique: true });
-    db.collection('profiles').createIndex({ qrCode: 1 }, { unique: true, sparse: true });
     db.collection('profiles').createIndex({ timestamp: -1 });
     db.collection('profiles').createIndex({ updatedAt: -1 });
     db.collection('access_logs').createIndex({ timestamp: -1 });
     db.collection('access_logs').createIndex({ lagId: 1 });
     db.collection('access_logs').createIndex({ date: -1 });
+    // Lets the app retry a log without it being saved twice
+    db.collection('access_logs').createIndex(
+      { eventId: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { eventId: { $type: 'string' } }
+      }
+    ).catch(err => console.error('eventId index error:', err.message));
     db.collection('attendance').createIndex({ lagId: 1, date: -1 });
     db.collection('attendance').createIndex({ date: -1 });
     db.collection('admins').createIndex({ username: 1 }, { unique: true });
@@ -93,14 +102,9 @@ const calculateTemplateSimilarity = (template1, template2) => {
 };
 
 // More accurate duplicate detection
-const checkFaceDuplicate = async (faceTemplate, excludeProfileId = null) => {
+const checkFaceDuplicate = async (faceTemplate) => {
   try {
-    const query = {};
-    if (excludeProfileId) {
-      query._id = { $ne: new ObjectId(excludeProfileId) };
-    }
-
-    const allProfiles = await db.collection('profiles').find(query).toArray();
+    const allProfiles = await db.collection('profiles').find({}).toArray();
     const newTemplate = convertBinaryData(faceTemplate);
 
     console.log(`Checking face template against ${allProfiles.length} profiles`);
@@ -151,9 +155,9 @@ const checkFaceDuplicate = async (faceTemplate, excludeProfileId = null) => {
 // API Routes
 
 // Save/Create Profile with duplicate checks
-app.post('/api/profiles', authenticateToken, async (req, res) => {
+app.post('/api/profiles', async (req, res) => {
   try {
-    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate, qrCode } = req.body;
+    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
 
     console.log('\n=== NEW PROFILE REQUEST RECEIVED ===');
     console.log(`Name: ${name}`);
@@ -179,19 +183,6 @@ app.post('/api/profiles', authenticateToken, async (req, res) => {
       });
     }
 
-    // Check for duplicate QR code
-    if (qrCode) {
-      const existingQrCode = await db.collection('profiles').findOne({ qrCode });
-      if (existingQrCode) {
-        console.log(`Duplicate QR code found: ${existingQrCode.name}`);
-        return res.status(409).json({
-          success: false,
-          error: `This QR code is already registered to ${existingQrCode.name}`,
-          duplicateType: 'QR_CODE'
-        });
-      }
-    }
-
     console.log('No duplicates found. Saving profile...');
 
     // Convert base64 strings to binary
@@ -202,7 +193,6 @@ app.post('/api/profiles', authenticateToken, async (req, res) => {
       faceImage: convertBinaryData(faceImage),
       thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
       fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
-      qrCode: qrCode || null,
       timestamp: Date.now(),
       createdAt: new Date(),
       updatedAt: new Date()
@@ -223,113 +213,6 @@ app.post('/api/profiles', authenticateToken, async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message 
-    });
-  }
-});
-
-// Update Profile by LAG ID (edit an existing profile's name, LAG ID, face, and/or fingerprint).
-// Uses LAG ID rather than the Mongo _id because the Android app's local Room database
-// has its own separate auto-incrementing id that was never linked back to the Mongo _id.
-app.put('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
-  try {
-    const { lagId: currentLagId } = req.params; // identifies the record to update
-    const { name, lagId: newLagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate, qrCode } = req.body;
-
-    console.log('\n=== UPDATE PROFILE REQUEST RECEIVED ===');
-    console.log(`Current LAG ID: ${currentLagId}`);
-    console.log(`Name: ${name}`);
-    console.log(`New LAG ID: ${newLagId}`);
-
-    // Validate required fields
-    if (!name || !newLagId || !faceTemplate || !faceImage) {
-      console.log('Missing required fields');
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields'
-      });
-    }
-
-    const existingProfile = await db.collection('profiles').findOne({ lagId: currentLagId });
-    if (!existingProfile) {
-      return res.status(404).json({
-        success: false,
-        error: 'Profile not found'
-      });
-    }
-
-    // Check for a LAG ID conflict only if it's actually changing, excluding this profile itself
-    if (newLagId !== currentLagId) {
-      const lagIdConflict = await db.collection('profiles').findOne({ lagId: newLagId });
-      if (lagIdConflict) {
-        console.log(`Duplicate LAG ID found: ${lagIdConflict.name}`);
-        return res.status(409).json({
-          success: false,
-          error: `LAG ID '${newLagId}' is already registered to ${lagIdConflict.name}`,
-          duplicateType: 'LAG_ID'
-        });
-      }
-    }
-
-    // Check for a QR code conflict, excluding this profile itself
-    if (qrCode && qrCode !== existingProfile.qrCode) {
-      const qrConflict = await db.collection('profiles').findOne({
-        qrCode,
-        _id: { $ne: existingProfile._id }
-      });
-      if (qrConflict) {
-        console.log(`Duplicate QR code found: ${qrConflict.name}`);
-        return res.status(409).json({
-          success: false,
-          error: `This QR code is already registered to ${qrConflict.name}`,
-          duplicateType: 'QR_CODE'
-        });
-      }
-    }
-
-    // Check for duplicate face, excluding this profile itself
-    const faceDuplicateResult = await checkFaceDuplicate(faceTemplate, existingProfile._id.toString());
-    if (faceDuplicateResult.isDuplicate) {
-      console.log(`Duplicate face found: ${faceDuplicateResult.profile.name}`);
-      return res.status(409).json({
-        success: false,
-        error: `This face is already registered as ${faceDuplicateResult.profile.name}`,
-        duplicateType: 'FACE'
-      });
-    }
-
-    console.log('No conflicts found. Updating profile...');
-
-    const update = {
-      name,
-      lagId: newLagId,
-      faceTemplate: convertBinaryData(faceTemplate),
-      faceImage: convertBinaryData(faceImage),
-      thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
-      fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
-      qrCode: qrCode || existingProfile.qrCode || null,
-      updatedAt: new Date()
-      // Note: `timestamp`/`createdAt` are intentionally left untouched so the
-      // profile's original "added on" date doesn't change on an edit.
-    };
-
-    await db.collection('profiles').updateOne(
-      { _id: existingProfile._id },
-      { $set: update }
-    );
-
-    console.log(`Profile updated successfully: ${existingProfile._id}`);
-
-    res.json({
-      success: true,
-      profileId: existingProfile._id.toString(),
-      message: 'Profile updated successfully'
-    });
-
-  } catch (error) {
-    console.error('Error updating profile:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
     });
   }
 });
@@ -440,8 +323,7 @@ app.get('/api/profiles', async (req, res) => {
       timestamp: 1,
       createdAt: 1,
       updatedAt: 1,
-      fingerprintTemplate: 1,
-      qrCode: 1
+      fingerprintTemplate: 1  
     };
 
     if (includeImages === 'true') {
@@ -462,7 +344,6 @@ app.get('/api/profiles', async (req, res) => {
       faceImage: profile.faceImage?.toString('base64') ?? null,
       thumbnail: profile.thumbnail?.toString('base64') ?? null,
       fingerprintTemplate: profile.fingerprintTemplate?.toString('base64') ?? null,
-      qrCode: profile.qrCode ?? null,
       timestamp: profile.timestamp,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt
@@ -560,7 +441,6 @@ app.get('/api/profiles/lagid/:lagId', async (req, res) => {
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
         fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
-        qrCode: profile.qrCode ?? null,
         timestamp: profile.timestamp
       }
     });
@@ -600,7 +480,6 @@ app.get('/api/profiles/:id', async (req, res) => {
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
         fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
-        qrCode: profile.qrCode ?? null,
         timestamp: profile.timestamp
       }
     });
@@ -615,7 +494,7 @@ app.get('/api/profiles/:id', async (req, res) => {
 });
 
 // Delete Profile
-app.delete('/api/profiles/:id', authenticateToken, async (req, res) => {
+app.delete('/api/profiles/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -645,7 +524,7 @@ app.delete('/api/profiles/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete Profile by LAG ID
-app.delete('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
+app.delete('/api/profiles/lagid/:lagId', async (req, res) => {
   try {
     const { lagId } = req.params;
 
@@ -689,7 +568,7 @@ app.get('/api/profiles/stats/count', async (req, res) => {
 });
 
 // Clear all profiles (for testing)
-app.delete('/api/profiles/admin/clear-all', authenticateToken, async (req, res) => {
+app.delete('/api/profiles/admin/clear-all', async (req, res) => {
   try {
     const result = await db.collection('profiles').deleteMany({});
     console.log(`Cleared ${result.deletedCount} profiles from database`);
@@ -712,29 +591,85 @@ app.delete('/api/profiles/admin/clear-all', authenticateToken, async (req, res) 
 // Log Access Attempt
 app.post('/api/access/logs', async (req, res) => {
   try {
-    const { 
-      lagId, 
-      name, 
-      accessGranted,  
-      deviceId, 
+    if (!deviceKeyValid(req)) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid device key'
+      });
+    }
+
+    const {
+      lagId,
+      name,
+      accessGranted,
+      deviceId,
       accessType = 'CARD',
-     } = req.body;
+      // Optional extras for the Gate Monitor (older app versions
+      // can leave these out)
+      eventId,
+      reason,
+      score,
+      gate,
+      occurredAt
+    } = req.body;
+
+    const granted = accessGranted === true || accessGranted === 'true';
+
+    // Use the phone's time unless it's invalid or in the future
+    const now = Date.now();
+    let ts = Number(new Date(occurredAt));
+    if (!occurredAt || !Number.isFinite(ts) || ts > now + 5 * 60000) {
+      ts = now;
+    }
+
+    // Fill in the registered name if the app didn't send one
+    let resolvedName = name;
+    if ((!name || name === 'Unknown') && lagId) {
+      const profile = await db.collection('profiles').findOne(
+        { lagId },
+        { projection: { name: 1 } }
+      );
+      if (profile) resolvedName = profile.name;
+    }
 
     const accessLog = {
       lagId: lagId || 'UNKNOWN',
-      name: name || 'Unknown',
-      accessGranted,
-      accessType,
+      name: resolvedName || 'Unknown',
+      accessGranted: granted,
+      accessType: String(accessType).toUpperCase(),
       deviceId: deviceId || 'UNKNOWN',
-      timestamp: Date.now(),
-      date: new Date().toISOString().split('T')[0],
-      time: new Date().toTimeString().split(' ')[0],
+      timestamp: ts,
+      date: new Date(ts).toISOString().split('T')[0],
+      time: new Date(ts).toTimeString().split(' ')[0],
       createdAt: new Date()
     };
+    if (typeof eventId === 'string' && eventId) accessLog.eventId = eventId;
+    if (reason) accessLog.reason = String(reason).slice(0, 200);
+    if (gate) accessLog.gate = String(gate).slice(0, 80);
+    if (score !== undefined && score !== null && !isNaN(Number(score))) {
+      accessLog.score = Number(score);
+    }
 
-    const result = await db.collection('access_logs').insertOne(accessLog);
+    let result;
+    try {
+      result = await db.collection('access_logs').insertOne(accessLog);
+    } catch (err) {
+      if (err.code === 11000 && accessLog.eventId) {
+        // Same eventId sent again (a retry): already saved
+        return res.status(200).json({
+          success: true,
+          duplicate: true,
+          message: 'Access already logged'
+        });
+      }
+      throw err;
+    }
 
-    console.log(`Access logged: ${name} - ${accessGranted ? 'GRANTED' : 'DENIED'}`);
+    console.log(`Access logged: ${accessLog.name} - ${granted ? 'GRANTED' : 'DENIED'}`);
+
+    broadcastAccessEvent(
+      formatAccessLog({ ...accessLog, _id: result.insertedId })
+    );
 
     res.status(201).json({
       success: true,
@@ -749,6 +684,106 @@ app.post('/api/access/logs', async (req, res) => {
     });
   }
 });
+
+// Optional device key. When ACCESS_DEVICE_KEY is set in .env, the app
+// must send it in the X-Device-Key header to log access. When it isn't
+// set, logs are accepted as before.
+function deviceKeyValid(req) {
+  const expected = process.env.ACCESS_DEVICE_KEY;
+  if (!expected) return true;
+  const given = req.get('X-Device-Key') || '';
+  const a = crypto.createHash('sha256').update(given).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+function formatAccessLog(log) {
+  return {
+    id: log._id.toString(),
+    lagId: log.lagId,
+    name: log.name,
+    accessGranted: log.accessGranted,
+    accessType: log.accessType,
+    deviceId: log.deviceId,
+    gate: log.gate || null,
+    reason: log.reason || null,
+    score: log.score ?? null,
+    timestamp: log.timestamp,
+    date: log.date,
+    time: log.time
+  };
+}
+
+// Live feed for the Gate Monitor (gate.html). EventSource can't send
+// headers, so the login token comes in the URL: ?token=...
+app.get('/api/access/stream', (req, res) => {
+  if (!verifyToken(req.query.token)) {
+    return res.status(401).json({ success: false, error: 'Not logged in' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // stop proxies holding events
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+  // Comment lines keep the connection open through proxies (Render)
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  accessStreamClients.push(res);
+
+  req.on('close', () => {
+    clearInterval(ping);
+    accessStreamClients = accessStreamClients.filter(c => c !== res);
+  });
+});
+
+const broadcastAccessEvent = (event) => {
+  const message = `data: ${JSON.stringify({ type: 'access-event', event })}\n\n`;
+  accessStreamClients.forEach(client => client.write(message));
+};
+
+// Registered photo from the person's profile, for the guard to compare
+app.get('/api/access/photo/:lagId', authenticateToken, async (req, res) => {
+  try {
+    const profile = await db.collection('profiles').findOne(
+      { lagId: req.params.lagId },
+      { projection: { faceImage: 1, thumbnail: 1 } }
+    );
+    const image = toImageBuffer(profile?.faceImage)
+      || toImageBuffer(profile?.thumbnail);
+    if (!image) {
+      return res.status(404).json({ success: false, error: 'No photo' });
+    }
+    res.setHeader('Content-Type', imageType(image));
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(image);
+  } catch (error) {
+    console.error('Error fetching photo:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Mongo returns stored images as BSON Binary; turn them into a Buffer
+function toImageBuffer(value) {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value.length ? value : null;
+  if (value._bsontype === 'Binary') {
+    const buf = Buffer.from(value.buffer);
+    return buf.length ? buf : null;
+  }
+  if (typeof value === 'string') {
+    const buf = Buffer.from(value, 'base64');
+    return buf.length ? buf : null;
+  }
+  return null;
+}
+
+function imageType(buf) {
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+  if (buf.slice(0, 4).toString() === 'RIFF') return 'image/webp';
+  return 'image/jpeg';
+}
 
 
 // Access Logs with filters
@@ -767,6 +802,9 @@ app.get('/api/access/logs', async (req, res) => {
     if (endDate) query.date.$lte = endDate;
     }
 
+    // Gate Monitor filters: method, text search, exact time range
+    addGateFilters(query, req.query);
+
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const logs = await db.collection('access_logs')
@@ -778,17 +816,7 @@ app.get('/api/access/logs', async (req, res) => {
 
     const total = await db.collection('access_logs').countDocuments(query);
 
-    const formattedLogs = logs.map(log => ({
-      id: log._id.toString(),
-      lagId: log.lagId, 
-      name: log.name,
-      accessGranted: log.accessGranted,
-      accessType: log.accessType,
-      deviceId: log.deviceId,
-      timestamp: log.timestamp,
-      date: log.date,
-      time: log.time
-    }));
+    const formattedLogs = logs.map(formatAccessLog);
 
     res.json({
       success: true,
@@ -807,6 +835,28 @@ app.get('/api/access/logs', async (req, res) => {
   }
 });
 
+// Extra filters used by the Gate Monitor:
+//   accessType=FACE|FINGERPRINT|QR|NFC|CARD, q=name/LAG ID/gate text,
+//   from/to = timestamps in ms (local-day ranges from the browser)
+function addGateFilters(query, params) {
+  const { accessType, q, from, to } = params;
+  if (accessType) query.accessType = String(accessType).toUpperCase();
+  if (q && String(q).trim()) {
+    const safe = String(q).trim().slice(0, 80)
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = { $regex: safe, $options: 'i' };
+    query.$or = [{ name: re }, { lagId: re }, { gate: re }];
+  }
+  const fromMs = Number(from);
+  const toMs = Number(to);
+  if (from && Number.isFinite(fromMs)) {
+    query.timestamp = { ...query.timestamp, $gte: fromMs };
+  }
+  if (to && Number.isFinite(toMs)) {
+    query.timestamp = { ...query.timestamp, $lt: toMs };
+  }
+}
+
 // Access Statistics
 app.get('/api/access/stats', async (req, res) => {
   try {
@@ -818,6 +868,7 @@ app.get('/api/access/stats', async (req, res) => {
       if (startDate) query.date.$gte = startDate;
       if (endDate) query.date.$lte = endDate;
     }
+    addGateFilters(query, req.query);
 
     const totalAttempts = await db.collection('access_logs').countDocuments(query);
     const grantedAccess = await db.collection('access_logs').countDocuments({

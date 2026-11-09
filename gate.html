@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gate Monitor</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        [hidden] { display: none !important; }
+
+        .container { display: grid; gap: 16px; }
+        .header { padding: 20px 24px; margin-bottom: 0; }
+        .header-top { margin-bottom: 0; flex-wrap: wrap; gap: 16px; }
+        .header-actions { flex-wrap: wrap; }
+
+        .btn {
+            border: 2px solid #e5e7eb;
+            background: white;
+            color: #374151;
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn:hover { border-color: #667eea; background: #f8f9fd; }
+        .btn:focus-visible,
+        .filters input:focus-visible,
+        .filters select:focus-visible {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        }
+
+        .conn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #6b7280;
+        }
+        .conn-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #f59e0b;
+        }
+        .conn[data-state="live"] .conn-dot { background: #10b981; }
+        .conn[data-state="down"] .conn-dot { background: #ef4444; }
+
+        /* ---------- live result ---------- */
+        .live {
+            display: grid;
+            grid-template-columns: minmax(180px, 260px) 1fr;
+            gap: 32px;
+            align-items: center;
+            padding: 28px;
+            border-radius: 24px;
+            background: white;
+            border: 3px solid #e5e7eb;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+            transition: background 0.25s, border-color 0.25s, opacity 0.4s;
+        }
+        .live[data-state="granted"] {
+            background: #ecfdf5;
+            border-color: #10b981;
+            --glow: rgba(16, 185, 129, 0.45);
+        }
+        .live[data-state="denied"] {
+            background: #fef2f2;
+            border-color: #ef4444;
+            --glow: rgba(239, 68, 68, 0.45);
+        }
+        /* An old result fades so it isn't mistaken for a new one */
+        .live.stale { opacity: 0.55; filter: saturate(0.4); }
+        .live.flash { animation: flash 0.6s ease-out 2; }
+        @keyframes flash {
+            from { box-shadow: 0 0 0 0 var(--glow); }
+            to { box-shadow: 0 0 0 20px transparent; }
+        }
+
+        .photo-frame {
+            aspect-ratio: 3 / 4;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            display: grid;
+            place-items: center;
+        }
+        .photo-frame img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .photo-empty {
+            color: #9ca3af;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            padding: 12px;
+        }
+
+        .live-body { min-width: 0; }
+        .live-status {
+            font-size: clamp(34px, 5.5vw, 72px);
+            font-weight: 800;
+            letter-spacing: -1px;
+            line-height: 1.05;
+            color: #9ca3af;
+        }
+        .live[data-state="idle"] .live-status {
+            font-size: clamp(22px, 2.6vw, 32px);
+            font-weight: 700;
+            letter-spacing: 0;
+        }
+        .live[data-state="granted"] .live-status { color: #047857; }
+        .live[data-state="denied"] .live-status { color: #b91c1c; }
+
+        .live-name {
+            margin: 12px 0 18px;
+            font-size: clamp(22px, 2.6vw, 34px);
+            font-weight: 700;
+            color: #1a1a2e;
+            overflow-wrap: anywhere;
+        }
+        .facts {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 14px 24px;
+        }
+        .facts dt {
+            color: #6b7280;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .facts dd {
+            margin: 4px 0 0;
+            font-size: 19px;
+            font-weight: 700;
+            color: #1a1a2e;
+            overflow-wrap: anywhere;
+        }
+        .live-reason {
+            margin-top: 16px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: 600;
+            font-size: 17px;
+        }
+
+        /* ---------- today ---------- */
+        .stats-grid { margin-bottom: 0; }
+        .stat-card { padding: 18px 20px; }
+        .stat-card.granted::before { background: linear-gradient(180deg, #10b981, #059669); }
+        .stat-card.denied::before { background: linear-gradient(180deg, #ef4444, #dc2626); }
+        .stat-header { margin-bottom: 0; align-items: center; }
+        .stat-value { font-size: 40px; margin-top: 6px; }
+
+        /* ---------- history ---------- */
+        .table-header {
+            display: grid;
+            gap: 16px;
+        }
+        .table-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .table-title .count { color: #6b7280; font-size: 14px; font-weight: 600; }
+        .table-title .btn { margin-left: auto; }
+
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .filters input,
+        .filters select {
+            padding: 10px 14px;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font: inherit;
+            font-size: 14px;
+            color: #374151;
+            background: white;
+        }
+        .filters input[type="search"] { flex: 1 1 240px; }
+        .filters label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #6b7280;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .table-scroll { overflow-x: auto; }
+        th, td { padding: 14px 20px; white-space: nowrap; }
+        td.reason { white-space: normal; min-width: 180px; color: #6b7280; }
+        tbody tr { cursor: pointer; }
+        tbody tr.new { animation: rowIn 1.6s ease-out; }
+        @keyframes rowIn {
+            from { background: #e0e7ff; }
+            to { background: transparent; }
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+        .badge.ok { background: #d1fae5; color: #047857; }
+        .badge.bad { background: #fee2e2; color: #b91c1c; }
+
+        .empty-row td {
+            text-align: center;
+            color: #6b7280;
+            padding: 40px 20px;
+            cursor: default;
+        }
+        .pager {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            color: #6b7280;
+            font-size: 14px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .pager-buttons { display: flex; gap: 8px; }
+        .btn:disabled { opacity: 0.45; cursor: default; }
+
+        /* ---------- detail ---------- */
+        dialog {
+            border: none;
+            border-radius: 24px;
+            padding: 28px;
+            width: min(640px, 92vw);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+        .detail {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            gap: 24px;
+        }
+        .detail .facts { grid-template-columns: 1fr; gap: 10px; }
+        .detail .facts dd { font-size: 16px; }
+        .detail-name {
+            font-size: 24px;
+            font-weight: 800;
+            color: #1a1a2e;
+            margin: 10px 0 16px;
+        }
+        .detail-actions { grid-column: 1 / -1; justify-self: end; }
+
+        /* ---------- start overlay ---------- */
+        .start {
+            position: fixed;
+            inset: 0;
+            background: rgba(26, 26, 46, 0.85);
+            display: grid;
+            place-items: center;
+            z-index: 50;
+            padding: 16px;
+        }
+        .start-card {
+            background: white;
+            border-radius: 24px;
+            padding: 32px;
+            max-width: 440px;
+            text-align: center;
+        }
+        .start-card h1 { font-size: 26px; color: #1a1a2e; margin-bottom: 10px; }
+        .start-card p { color: #6b7280; line-height: 1.55; margin-bottom: 24px; }
+
+        @media (max-width: 760px) {
+            body { padding: 12px; }
+            .header-text h1 { font-size: 22px; }
+            .live { grid-template-columns: 1fr; padding: 20px; gap: 20px; }
+            .photo-frame { max-width: 200px; }
+            .detail { grid-template-columns: 1fr; }
+            .detail .photo-frame { max-width: 160px; }
+            th, td { padding: 12px 14px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-top">
+                <div class="header-title">
+                    <div class="header-icon" aria-hidden="true">🚦</div>
+                    <div class="header-text">
+                        <h1>GATE MONITOR</h1>
+                        <p class="conn" id="conn" data-state="connecting">
+                            <span class="conn-dot" aria-hidden="true"></span>
+                            <span id="connText">Connecting…</span>
+                        </p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <a class="btn" href="dashboard.html">📊 Attendance</a>
+                    <button class="btn" id="soundBtn" type="button" aria-pressed="true">
+                        🔊 Sound on
+                    </button>
+                    <button class="logout-btn" id="logoutBtn" type="button">🚪 Logout</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live result -->
+        <section class="live" id="live" data-state="idle" aria-live="assertive">
+            <div class="photo-frame">
+                <img id="livePhoto" alt="Registered photo" hidden>
+                <div class="photo-empty" id="livePhotoEmpty">No photo</div>
+            </div>
+            <div class="live-body">
+                <div class="live-status" id="liveStatus">Waiting for the next check</div>
+                <div class="live-name" id="liveName">&nbsp;</div>
+                <dl class="facts">
+                    <div><dt>LAG ID</dt><dd id="liveLag">–</dd></div>
+                    <div><dt>Method</dt><dd id="liveMethod">–</dd></div>
+                    <div><dt>Gate / Device</dt><dd id="liveGate">–</dd></div>
+                    <div><dt>Time</dt><dd id="liveTime">–</dd></div>
+                </dl>
+                <div class="live-reason" id="liveReason" hidden></div>
+            </div>
+        </section>
+
+        <!-- Today -->
+        <div class="stats-grid">
+            <div class="stat-card granted">
+                <div class="stat-header">
+                    <div>
+                        <div class="stat-label">Granted today</div>
+                        <div class="stat-value" id="cntGranted">0</div>
+                    </div>
+                    <div class="stat-icon-badge" aria-hidden="true">✅</div>
+                </div>
+            </div>
+            <div class="stat-card denied">
+                <div class="stat-header">
+                    <div>
+                        <div class="stat-label">Denied today</div>
+                        <div class="stat-value" id="cntDenied">0</div>
+                    </div>
+                    <div class="stat-icon-badge" aria-hidden="true">⛔</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History -->
+        <div class="table-card">
+            <div class="table-header">
+                <div class="table-title">
+                    <h2>Access History</h2>
+                    <span class="count" id="histCount"></span>
+                    <button class="btn" id="csvBtn" type="button">⬇ Export CSV</button>
+                </div>
+                <form class="filters" id="filters">
+                    <input type="search" name="q" aria-label="Search"
+                           placeholder="Search name, LAG ID or gate">
+                    <select name="accessGranted" aria-label="Result">
+                        <option value="">All results</option>
+                        <option value="true">Granted</option>
+                        <option value="false">Denied</option>
+                    </select>
+                    <select name="accessType" aria-label="Method">
+                        <option value="">All methods</option>
+                        <option value="FACE">Face</option>
+                        <option value="FINGERPRINT">Fingerprint</option>
+                        <option value="QR">QR code</option>
+                        <option value="NFC">NFC</option>
+                        <option value="CARD">Card</option>
+                    </select>
+                    <label>From <input type="date" name="from"></label>
+                    <label>To <input type="date" name="to"></label>
+                    <button class="btn" type="reset">Clear</button>
+                </form>
+            </div>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Result</th>
+                            <th>Name</th>
+                            <th>LAG ID</th>
+                            <th>Method</th>
+                            <th>Gate / Device</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows"></tbody>
+                </table>
+            </div>
+            <div class="pager">
+                <span id="pageInfo"></span>
+                <div class="pager-buttons">
+                    <button class="btn" id="prevBtn" type="button">← Previous</button>
+                    <button class="btn" id="nextBtn" type="button">Next →</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <dialog id="detail">
+        <form method="dialog" class="detail">
+            <div class="photo-frame">
+                <img id="dPhoto" alt="Registered photo" hidden>
+                <div class="photo-empty" id="dPhotoEmpty">No photo</div>
+            </div>
+            <div>
+                <span class="badge" id="dBadge"></span>
+                <div class="detail-name" id="dName"></div>
+                <dl class="facts" id="dFacts"></dl>
+            </div>
+            <button class="logout-btn detail-actions" value="close"
+                    style="background:#667eea;box-shadow:none">Close</button>
+        </form>
+    </dialog>
+
+    <!-- Browsers only allow sound after a click -->
+    <div class="start" id="start">
+        <div class="start-card">
+            <h1>🚦 Gate Monitor</h1>
+            <p>Every check from the access control app appears here,
+               with a beep for granted and an alarm for denied.</p>
+            <button class="refresh-btn" id="startBtn" type="button"
+                    style="margin:0 auto">Start monitoring</button>
+        </div>
+    </div>
+
+    <script>
+    (() => {
+        // Same server that serves this page
+        const API = '/api';
+        const PAGE_SIZE = 25;
+        const STALE_AFTER_MS = 20000;
+        const LATE_AFTER_MS = 60000;
+        const METHOD = {
+            FACE: 'Face',
+            FINGERPRINT: 'Fingerprint',
+            QR: 'QR code',
+            NFC: 'NFC',
+            CARD: 'Card',
+        };
+
+        const $ = (id) => document.getElementById(id);
+        const token = localStorage.getItem('authToken');
+
+        function toLogin() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('adminUser');
+            location.href = 'login.html';
+        }
+        if (!token) {
+            toLogin();
+            return;
+        }
+
+        async function api(path, opts = {}) {
+            const res = await fetch(API + path, {
+                ...opts,
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    ...(opts.headers || {}),
+                },
+            });
+            if (res.status === 401 || res.status === 403) {
+                toLogin();
+                throw new Error('Not logged in');
+            }
+            return res;
+        }
+
+        // ---------------- sound ----------------
+        let audio = null;
+        let soundOn = localStorage.getItem('gateSound') !== 'off';
+
+        function tone(freq, start, len, type = 'sine', vol = 0.25) {
+            const osc = audio.createOscillator();
+            const gain = audio.createGain();
+            osc.type = type;
+            osc.frequency.value = freq;
+            const t = audio.currentTime + start;
+            gain.gain.setValueAtTime(0.0001, t);
+            gain.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t + len);
+            osc.connect(gain).connect(audio.destination);
+            osc.start(t);
+            osc.stop(t + len + 0.02);
+        }
+
+        function beepGranted() {
+            if (!audio || !soundOn) return;
+            tone(880, 0, 0.14);
+            tone(1320, 0.18, 0.22);
+        }
+
+        function alarmDenied() {
+            if (!audio || !soundOn) return;
+            for (let i = 0; i < 4; i++) {
+                tone(620, i * 0.4, 0.19, 'square', 0.18);
+                tone(940, i * 0.4 + 0.2, 0.19, 'square', 0.18);
+            }
+        }
+
+        $('startBtn').addEventListener('click', () => {
+            try {
+                audio = new (window.AudioContext || window.webkitAudioContext)();
+                audio.resume();
+            } catch (e) {}
+            $('start').hidden = true;
+        });
+
+        function renderSound() {
+            $('soundBtn').textContent = soundOn ? '🔊 Sound on' : '🔇 Sound off';
+            $('soundBtn').setAttribute('aria-pressed', String(soundOn));
+        }
+        $('soundBtn').addEventListener('click', () => {
+            soundOn = !soundOn;
+            localStorage.setItem('gateSound', soundOn ? 'on' : 'off');
+            renderSound();
+            if (soundOn) beepGranted();
+        });
+        renderSound();
+
+        $('logoutBtn').addEventListener('click', async () => {
+            try {
+                await api('/auth/logout', { method: 'POST' });
+            } catch (e) {}
+            toLogin();
+        });
+
+        // ---------------- photos ----------------
+        // <img> can't send the login token, so fetch the photo and show it
+        // from memory. Cached per LAG ID while the page is open.
+        const photoCache = new Map();
+
+        function photoFor(lagId) {
+            if (!photoCache.has(lagId)) {
+                const p = api(`/access/photo/${encodeURIComponent(lagId)}`)
+                    .then((res) => (res.ok ? res.blob() : null))
+                    .then((blob) => (blob ? URL.createObjectURL(blob) : null))
+                    .catch(() => null);
+                photoCache.set(lagId, p);
+            }
+            return photoCache.get(lagId);
+        }
+
+        async function showPhoto(img, empty, lagId) {
+            img.hidden = true;
+            empty.hidden = false;
+            const known = lagId && lagId !== 'UNKNOWN';
+            empty.textContent = known ? 'Loading photo…' : 'No photo';
+            if (!known) return;
+            img.dataset.lag = lagId;
+            const url = await photoFor(lagId);
+            if (img.dataset.lag !== lagId) return; // a newer event took over
+            if (url) {
+                img.src = url;
+                img.hidden = false;
+                empty.hidden = true;
+            } else {
+                empty.textContent = 'No registered photo';
+            }
+        }
+
+        // ---------------- formatting ----------------
+        const timeFmt = new Intl.DateTimeFormat(undefined, {
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+        const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
+            day: '2-digit', month: 'short',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+
+        function ago(ms) {
+            const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+            if (s < 60) return `${s} s ago`;
+            const m = Math.round(s / 60);
+            if (m < 60) return `${m} min ago`;
+            return `${Math.round(m / 60)} h ago`;
+        }
+
+        const where = (e) =>
+            [e.gate, e.deviceId !== 'UNKNOWN' ? e.deviceId : null]
+                .filter(Boolean).join(' · ') || '–';
+
+        const showName = (e) =>
+            e.name && e.name !== 'Unknown' ? e.name : 'Unknown person';
+
+        // ---------------- live panel ----------------
+        let last = null;
+        let staleTimer = null;
+
+        function showLive(e, isNew) {
+            last = e;
+            const live = $('live');
+            const ok = e.accessGranted === true;
+            live.dataset.state = ok ? 'granted' : 'denied';
+            live.classList.remove('stale', 'flash');
+            if (isNew) {
+                void live.offsetWidth; // restart the animation
+                live.classList.add('flash');
+            }
+            $('liveStatus').textContent = ok ? 'ACCESS GRANTED' : 'ACCESS DENIED';
+            $('liveName').textContent = showName(e);
+            $('liveLag').textContent = e.lagId || '–';
+            $('liveMethod').textContent = METHOD[e.accessType] || e.accessType || '–';
+            $('liveGate').textContent = where(e);
+            tickTime();
+            $('liveReason').hidden = ok || !e.reason;
+            $('liveReason').textContent = e.reason ? `Reason: ${e.reason}` : '';
+            showPhoto($('livePhoto'), $('livePhotoEmpty'), e.lagId);
+
+            clearTimeout(staleTimer);
+            if (isNew) {
+                staleTimer = setTimeout(() => live.classList.add('stale'), STALE_AFTER_MS);
+            } else {
+                live.classList.add('stale');
+            }
+        }
+
+        function tickTime() {
+            if (!last) return;
+            $('liveTime').textContent =
+                `${timeFmt.format(new Date(last.timestamp))} · ${ago(last.timestamp)}`;
+        }
+        setInterval(tickTime, 1000);
+
+        // ---------------- today's counts ----------------
+        function startOfToday() {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            return d.getTime();
+        }
+
+        async function loadToday() {
+            try {
+                const res = await api(`/access/stats?from=${startOfToday()}`);
+                const body = await res.json();
+                if (!body.success) return;
+                $('cntGranted').textContent = body.data.grantedAccess;
+                $('cntDenied').textContent = body.data.deniedAccess;
+            } catch (e) {}
+        }
+
+        // ---------------- history ----------------
+        let page = 1;
+        let totalPages = 1;
+        let total = 0;
+
+        function filterParams() {
+            const f = new FormData($('filters'));
+            const p = new URLSearchParams();
+            const q = String(f.get('q') || '').trim();
+            if (q) p.set('q', q);
+            if (f.get('accessGranted')) p.set('accessGranted', f.get('accessGranted'));
+            if (f.get('accessType')) p.set('accessType', f.get('accessType'));
+            // Local days -> exact times, so "today" means today in Lagos
+            if (f.get('from')) {
+                p.set('from', new Date(`${f.get('from')}T00:00:00`).getTime());
+            }
+            if (f.get('to')) {
+                const end = new Date(`${f.get('to')}T00:00:00`);
+                end.setDate(end.getDate() + 1);
+                p.set('to', end.getTime());
+            }
+            return p;
+        }
+
+        function rowFor(e, isNew) {
+            const tr = document.createElement('tr');
+            if (isNew) tr.className = 'new';
+            const ok = e.accessGranted === true;
+            const cells = [
+                dateTimeFmt.format(new Date(e.timestamp)),
+                null,
+                showName(e),
+                e.lagId || '–',
+                METHOD[e.accessType] || e.accessType || '–',
+                where(e),
+                e.reason || '',
+            ];
+            cells.forEach((v, i) => {
+                const td = document.createElement('td');
+                if (i === 1) {
+                    const b = document.createElement('span');
+                    b.className = `badge ${ok ? 'ok' : 'bad'}`;
+                    b.textContent = ok ? 'GRANTED' : 'DENIED';
+                    td.append(b);
+                } else if (i === 3) {
+                    const s = document.createElement('span');
+                    s.className = 'lag-id';
+                    s.textContent = v;
+                    td.append(s);
+                } else {
+                    td.textContent = v;
+                }
+                if (i === 6) td.className = 'reason';
+                tr.append(td);
+            });
+            tr.addEventListener('click', () => openDetail(e));
+            return tr;
+        }
+
+        function renderEmpty() {
+            const tr = document.createElement('tr');
+            tr.className = 'empty-row';
+            const td = document.createElement('td');
+            td.colSpan = 7;
+            td.textContent = 'No access records match these filters.';
+            tr.append(td);
+            $('rows').append(tr);
+        }
+
+        function renderPager() {
+            $('histCount').textContent = total === 1 ? '1 record' : `${total} records`;
+            $('pageInfo').textContent = total ? `Page ${page} of ${totalPages}` : '';
+            $('prevBtn').disabled = page <= 1;
+            $('nextBtn').disabled = page >= totalPages;
+        }
+
+        async function loadHistory(goTo = 1) {
+            const p = filterParams();
+            p.set('page', goTo);
+            p.set('limit', PAGE_SIZE);
+            try {
+                const res = await api(`/access/logs?${p}`);
+                const body = await res.json();
+                if (!body.success) return;
+                page = body.page;
+                total = body.total;
+                totalPages = Math.max(1, body.totalPages);
+                $('rows').textContent = '';
+                body.logs.forEach((e) => $('rows').append(rowFor(e, false)));
+                if (!body.logs.length) renderEmpty();
+                renderPager();
+
+                // On first load, show the latest result (already faded)
+                if (!last && goTo === 1 && ![...filterParams().keys()].length
+                    && body.logs.length) {
+                    showLive(body.logs[0], false);
+                }
+            } catch (e) {}
+        }
+
+        function addLiveRow(e) {
+            const filtered = [...filterParams().keys()].length > 0;
+            if (filtered || page !== 1) {
+                loadHistory(page); // let the server decide where it belongs
+                return;
+            }
+            $('rows').querySelector('.empty-row')?.remove();
+            $('rows').prepend(rowFor(e, true));
+            const rows = $('rows').children;
+            if (rows.length > PAGE_SIZE) rows[rows.length - 1].remove();
+            total += 1;
+            totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+            renderPager();
+        }
+
+        let typing = null;
+        $('filters').addEventListener('input', () => {
+            clearTimeout(typing);
+            typing = setTimeout(() => loadHistory(1), 300);
+        });
+        $('filters').addEventListener('reset', () => setTimeout(() => loadHistory(1), 0));
+        $('filters').addEventListener('submit', (ev) => ev.preventDefault());
+        $('prevBtn').addEventListener('click', () => loadHistory(page - 1));
+        $('nextBtn').addEventListener('click', () => loadHistory(page + 1));
+
+        // ---------------- CSV ----------------
+        $('csvBtn').addEventListener('click', async () => {
+            const p = filterParams();
+            p.set('page', 1);
+            p.set('limit', 10000);
+            const btn = $('csvBtn');
+            btn.disabled = true;
+            btn.textContent = 'Preparing…';
+            try {
+                const body = await (await api(`/access/logs?${p}`)).json();
+                const head = ['Date', 'Time', 'Result', 'Name', 'LAG ID',
+                              'Method', 'Gate', 'Device', 'Reason', 'Score'];
+                const cell = (v) => {
+                    let s = v === null || v === undefined ? '' : String(v);
+                    if (/^[=+\-@]/.test(s)) s = `'${s}`; // no Excel formulas
+                    return `"${s.replace(/"/g, '""')}"`;
+                };
+                const lines = [head.map(cell).join(',')];
+                for (const e of body.logs || []) {
+                    const d = new Date(e.timestamp);
+                    lines.push([
+                        d.toLocaleDateString(), d.toLocaleTimeString(),
+                        e.accessGranted ? 'GRANTED' : 'DENIED',
+                        e.name, e.lagId, e.accessType, e.gate,
+                        e.deviceId, e.reason, e.score,
+                    ].map(cell).join(','));
+                }
+                const blob = new Blob(['﻿' + lines.join('\r\n')],
+                                      { type: 'text/csv' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `access-log-${new Date().toISOString().slice(0, 10)}.csv`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            } catch (e) {
+                alert('Could not export. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '⬇ Export CSV';
+            }
+        });
+
+        // ---------------- detail ----------------
+        function openDetail(e) {
+            const ok = e.accessGranted === true;
+            $('dBadge').className = `badge ${ok ? 'ok' : 'bad'}`;
+            $('dBadge').textContent = ok ? 'ACCESS GRANTED' : 'ACCESS DENIED';
+            $('dName').textContent = showName(e);
+            const facts = [
+                ['LAG ID', e.lagId],
+                ['Time', dateTimeFmt.format(new Date(e.timestamp))],
+                ['Method', METHOD[e.accessType] || e.accessType],
+                ['Gate', e.gate],
+                ['Device', e.deviceId !== 'UNKNOWN' ? e.deviceId : null],
+                ['Reason', e.reason],
+                ['Score', e.score === null ? null : Number(e.score).toFixed(3)],
+            ];
+            const dl = $('dFacts');
+            dl.textContent = '';
+            for (const [k, v] of facts) {
+                if (v === null || v === undefined || v === '') continue;
+                const div = document.createElement('div');
+                const dt = document.createElement('dt');
+                const dd = document.createElement('dd');
+                dt.textContent = k;
+                dd.textContent = v;
+                div.append(dt, dd);
+                dl.append(div);
+            }
+            showPhoto($('dPhoto'), $('dPhotoEmpty'), e.lagId);
+            $('detail').showModal();
+        }
+
+        // ---------------- live stream ----------------
+        function setConn(state, text) {
+            $('conn').dataset.state = state;
+            $('connText').textContent = text;
+        }
+
+        let stream = null;
+        function connect() {
+            stream = new EventSource(
+                `${API}/access/stream?token=${encodeURIComponent(token)}`
+            );
+            stream.onopen = () => {
+                setConn('live', 'Live');
+                loadToday();      // catch up on anything missed
+                loadHistory(1);
+            };
+            stream.onmessage = (msg) => {
+                let data;
+                try { data = JSON.parse(msg.data); } catch (e) { return; }
+                if (data.type !== 'access-event') return;
+                const e = data.event;
+                addLiveRow(e);
+                const el = e.accessGranted ? $('cntGranted') : $('cntDenied');
+                if (e.timestamp >= startOfToday()) {
+                    el.textContent = Number(el.textContent) + 1;
+                }
+                // Logs the app queued while offline arrive late: add them
+                // to the history, but don't flash or sound for them.
+                if (Date.now() - e.timestamp > LATE_AFTER_MS) return;
+                showLive(e, true);
+                if (e.accessGranted) beepGranted();
+                else alarmDenied();
+            };
+            stream.onerror = async () => {
+                setConn('down', 'Reconnecting…');
+                if (stream.readyState === EventSource.CLOSED) {
+                    // Closed for good: maybe the login expired
+                    try {
+                        await api('/auth/verify');
+                    } catch (e) {
+                        return;
+                    }
+                    setTimeout(connect, 5000);
+                }
+                // Otherwise the browser retries by itself
+            };
+        }
+
+        connect();
+        loadToday();
+        loadHistory(1);
+    })();
+    </script>
+</body>
+</html>

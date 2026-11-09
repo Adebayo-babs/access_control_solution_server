@@ -31,6 +31,18 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+// Checks a token passed outside the Authorization header
+// (e.g. ?token= on the Gate Monitor's live stream, since EventSource
+// can't send headers). Returns the user, or null if invalid.
+const verifyToken = (token) => {
+  if (!token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch (error) {
+    return null;
+  }
+};
+
 // Setup authentication routes
 const setupAuthRoutes = (app, db) => {
   
@@ -306,4 +318,4 @@ const setupAuthRoutes = (app, db) => {
   });
 };
 
-module.exports = { setupAuthRoutes, authenticateToken };
+module.exports = { setupAuthRoutes, authenticateToken, verifyToken };
