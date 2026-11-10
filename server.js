@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
-const { setupAuthRoutes, authenticateToken, verifyToken } = require('./auth');
+const { setupAuthRoutes, authenticateToken } = require('./auth');
 require('dotenv').config();
 
 const app = express();
@@ -714,13 +714,9 @@ function formatAccessLog(log) {
   };
 }
 
-// Live feed for the Gate Monitor (gate.html). EventSource can't send
-// headers, so the login token comes in the URL: ?token=...
+// Live feed for the Gate Monitor (gate.html). Open: the gate screen
+// runs without logging in.
 app.get('/api/access/stream', (req, res) => {
-  if (!verifyToken(req.query.token)) {
-    return res.status(401).json({ success: false, error: 'Not logged in' });
-  }
-
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -743,8 +739,9 @@ const broadcastAccessEvent = (event) => {
   accessStreamClients.forEach(client => client.write(message));
 };
 
-// Registered photo from the person's profile, for the guard to compare
-app.get('/api/access/photo/:lagId', authenticateToken, async (req, res) => {
+// Registered photo from the person's profile, for the guard to compare.
+// Open, like the gate screen that shows it.
+app.get('/api/access/photo/:lagId', async (req, res) => {
   try {
     const profile = await db.collection('profiles').findOne(
       { lagId: req.params.lagId },
