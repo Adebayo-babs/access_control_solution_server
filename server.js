@@ -1405,12 +1405,32 @@ function lagIdQuery(lagId) {
   return { lagId: { $regex: `^${safe}$`, $options: 'i' } };
 }
 
-function passBody(profile) {
+// Profiles made before QR codes existed get one the first time
+// the staff member opens their pass. The gate picks it up on sync.
+async function ensureQrCode(profile) {
+  if (profile.qrCode) return profile.qrCode;
+  const code = crypto.randomUUID();
+  const result = await db.collection('profiles').updateOne(
+    { _id: profile._id, qrCode: { $in: [null, ''] } },
+    { $set: { qrCode: code, updatedAt: new Date() } }
+  );
+  if (result.modifiedCount === 1) {
+    console.log(`QR code created for ${profile.lagId}`);
+    return code;
+  }
+  // Another request set it first: use that one
+  const fresh = await db.collection('profiles').findOne(
+    { _id: profile._id },
+    { projection: { qrCode: 1 } }
+  );
+  return fresh?.qrCode || null;
+}
+
+async function passBody(profile) {
   return {
     name: profile.name,
     lagId: profile.lagId,
-    // null until an admin generates a QR for this profile
-    qrCode: profile.qrCode || null
+    qrCode: await ensureQrCode(profile)
   };
 }
 
@@ -1506,7 +1526,7 @@ app.post('/api/staff/login', async (req, res) => {
     res.json({
       success: true,
       token: staffToken(profile),
-      pass: passBody(profile)
+      pass: await passBody(profile)
     });
   } catch (error) {
     console.error('Staff login error:', error);
@@ -1556,7 +1576,7 @@ app.post('/api/staff/setup', async (req, res) => {
     res.json({
       success: true,
       token: staffToken(profile),
-      pass: passBody(profile)
+      pass: await passBody(profile)
     });
   } catch (error) {
     console.error('Staff setup error:', error);
@@ -1574,7 +1594,7 @@ app.get('/api/staff/pass', authenticateStaff, async (req, res) => {
         error: 'Your session has ended. Please log in again.'
       });
     }
-    res.json({ success: true, pass: passBody(profile) });
+    res.json({ success: true, pass: await passBody(profile) });
   } catch (error) {
     console.error('Staff pass error:', error);
     res.status(500).json({ success: false, error: 'Could not load pass.' });
