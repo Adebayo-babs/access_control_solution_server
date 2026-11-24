@@ -5,6 +5,8 @@ const multer = require('multer');
 const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
 const { setupAuthRoutes, authenticateToken } = require('./auth');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
@@ -37,6 +39,7 @@ MongoClient.connect(MONGODB_URI)
     
     // Create indexes
     db.collection('profiles').createIndex({ lagId: 1 }, { unique: true });
+    db.collection('profiles').createIndex({ qrCode: 1 }, { unique: true, sparse: true });
     db.collection('profiles').createIndex({ timestamp: -1 });
     db.collection('profiles').createIndex({ updatedAt: -1 });
     db.collection('access_logs').createIndex({ timestamp: -1 });
@@ -102,9 +105,14 @@ const calculateTemplateSimilarity = (template1, template2) => {
 };
 
 // More accurate duplicate detection
-const checkFaceDuplicate = async (faceTemplate) => {
+const checkFaceDuplicate = async (faceTemplate, excludeProfileId = null) => {
   try {
-    const allProfiles = await db.collection('profiles').find({}).toArray();
+    const query = {};
+    if (excludeProfileId) {
+      query._id = { $ne: new ObjectId(excludeProfileId) };
+    }
+
+    const allProfiles = await db.collection('profiles').find(query).toArray();
     const newTemplate = convertBinaryData(faceTemplate);
 
     console.log(`Checking face template against ${allProfiles.length} profiles`);
@@ -155,9 +163,9 @@ const checkFaceDuplicate = async (faceTemplate) => {
 // API Routes
 
 // Save/Create Profile with duplicate checks
-app.post('/api/profiles', async (req, res) => {
+app.post('/api/profiles', authenticateToken, async (req, res) => {
   try {
-    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate } = req.body;
+    const { name, lagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate, qrCode } = req.body;
 
     console.log('\n=== NEW PROFILE REQUEST RECEIVED ===');
     console.log(`Name: ${name}`);
@@ -183,6 +191,19 @@ app.post('/api/profiles', async (req, res) => {
       });
     }
 
+    // Check for duplicate QR code
+    if (qrCode) {
+      const existingQrCode = await db.collection('profiles').findOne({ qrCode });
+      if (existingQrCode) {
+        console.log(`Duplicate QR code found: ${existingQrCode.name}`);
+        return res.status(409).json({
+          success: false,
+          error: `This QR code is already registered to ${existingQrCode.name}`,
+          duplicateType: 'QR_CODE'
+        });
+      }
+    }
+
     console.log('No duplicates found. Saving profile...');
 
     // Convert base64 strings to binary
@@ -193,6 +214,7 @@ app.post('/api/profiles', async (req, res) => {
       faceImage: convertBinaryData(faceImage),
       thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
       fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
+      qrCode: qrCode || null,
       timestamp: Date.now(),
       createdAt: new Date(),
       updatedAt: new Date()
@@ -213,6 +235,113 @@ app.post('/api/profiles', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message 
+    });
+  }
+});
+
+// Update Profile by LAG ID (edit an existing profile's name, LAG ID, face, and/or fingerprint).
+// Uses LAG ID rather than the Mongo _id because the Android app's local Room database
+// has its own separate auto-incrementing id that was never linked back to the Mongo _id.
+app.put('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
+  try {
+    const { lagId: currentLagId } = req.params; // identifies the record to update
+    const { name, lagId: newLagId, faceTemplate, faceImage, thumbnail, fingerprintTemplate, qrCode } = req.body;
+
+    console.log('\n=== UPDATE PROFILE REQUEST RECEIVED ===');
+    console.log(`Current LAG ID: ${currentLagId}`);
+    console.log(`Name: ${name}`);
+    console.log(`New LAG ID: ${newLagId}`);
+
+    // Validate required fields
+    if (!name || !newLagId || !faceTemplate || !faceImage) {
+      console.log('Missing required fields');
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields'
+      });
+    }
+
+    const existingProfile = await db.collection('profiles').findOne({ lagId: currentLagId });
+    if (!existingProfile) {
+      return res.status(404).json({
+        success: false,
+        error: 'Profile not found'
+      });
+    }
+
+    // Check for a LAG ID conflict only if it's actually changing, excluding this profile itself
+    if (newLagId !== currentLagId) {
+      const lagIdConflict = await db.collection('profiles').findOne({ lagId: newLagId });
+      if (lagIdConflict) {
+        console.log(`Duplicate LAG ID found: ${lagIdConflict.name}`);
+        return res.status(409).json({
+          success: false,
+          error: `LAG ID '${newLagId}' is already registered to ${lagIdConflict.name}`,
+          duplicateType: 'LAG_ID'
+        });
+      }
+    }
+
+    // Check for a QR code conflict, excluding this profile itself
+    if (qrCode && qrCode !== existingProfile.qrCode) {
+      const qrConflict = await db.collection('profiles').findOne({
+        qrCode,
+        _id: { $ne: existingProfile._id }
+      });
+      if (qrConflict) {
+        console.log(`Duplicate QR code found: ${qrConflict.name}`);
+        return res.status(409).json({
+          success: false,
+          error: `This QR code is already registered to ${qrConflict.name}`,
+          duplicateType: 'QR_CODE'
+        });
+      }
+    }
+
+    // Check for duplicate face, excluding this profile itself
+    const faceDuplicateResult = await checkFaceDuplicate(faceTemplate, existingProfile._id.toString());
+    if (faceDuplicateResult.isDuplicate) {
+      console.log(`Duplicate face found: ${faceDuplicateResult.profile.name}`);
+      return res.status(409).json({
+        success: false,
+        error: `This face is already registered as ${faceDuplicateResult.profile.name}`,
+        duplicateType: 'FACE'
+      });
+    }
+
+    console.log('No conflicts found. Updating profile...');
+
+    const update = {
+      name,
+      lagId: newLagId,
+      faceTemplate: convertBinaryData(faceTemplate),
+      faceImage: convertBinaryData(faceImage),
+      thumbnail: thumbnail ? convertBinaryData(thumbnail) : null,
+      fingerprintTemplate: fingerprintTemplate ? convertBinaryData(fingerprintTemplate) : null,
+      qrCode: qrCode || existingProfile.qrCode || null,
+      updatedAt: new Date()
+      // Note: `timestamp`/`createdAt` are intentionally left untouched so the
+      // profile's original "added on" date doesn't change on an edit.
+    };
+
+    await db.collection('profiles').updateOne(
+      { _id: existingProfile._id },
+      { $set: update }
+    );
+
+    console.log(`Profile updated successfully: ${existingProfile._id}`);
+
+    res.json({
+      success: true,
+      profileId: existingProfile._id.toString(),
+      message: 'Profile updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -323,7 +452,8 @@ app.get('/api/profiles', async (req, res) => {
       timestamp: 1,
       createdAt: 1,
       updatedAt: 1,
-      fingerprintTemplate: 1  
+      fingerprintTemplate: 1,
+      qrCode: 1
     };
 
     if (includeImages === 'true') {
@@ -344,6 +474,7 @@ app.get('/api/profiles', async (req, res) => {
       faceImage: profile.faceImage?.toString('base64') ?? null,
       thumbnail: profile.thumbnail?.toString('base64') ?? null,
       fingerprintTemplate: profile.fingerprintTemplate?.toString('base64') ?? null,
+      qrCode: profile.qrCode ?? null,
       timestamp: profile.timestamp,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt
@@ -441,6 +572,7 @@ app.get('/api/profiles/lagid/:lagId', async (req, res) => {
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
         fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
+        qrCode: profile.qrCode ?? null,
         timestamp: profile.timestamp
       }
     });
@@ -480,6 +612,7 @@ app.get('/api/profiles/:id', async (req, res) => {
         faceImage: profile.faceImage ? profile.faceImage.toString('base64') : null,
         thumbnail: profile.thumbnail ? profile.thumbnail.toString('base64') : null,
         fingerprintTemplate: profile.fingerprintTemplate ? profile.fingerprintTemplate.toString('base64') : null,
+        qrCode: profile.qrCode ?? null,
         timestamp: profile.timestamp
       }
     });
@@ -494,7 +627,7 @@ app.get('/api/profiles/:id', async (req, res) => {
 });
 
 // Delete Profile
-app.delete('/api/profiles/:id', async (req, res) => {
+app.delete('/api/profiles/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -524,7 +657,7 @@ app.delete('/api/profiles/:id', async (req, res) => {
 });
 
 // Delete Profile by LAG ID
-app.delete('/api/profiles/lagid/:lagId', async (req, res) => {
+app.delete('/api/profiles/lagid/:lagId', authenticateToken, async (req, res) => {
   try {
     const { lagId } = req.params;
 
@@ -568,7 +701,7 @@ app.get('/api/profiles/stats/count', async (req, res) => {
 });
 
 // Clear all profiles (for testing)
-app.delete('/api/profiles/admin/clear-all', async (req, res) => {
+app.delete('/api/profiles/admin/clear-all', authenticateToken, async (req, res) => {
   try {
     const result = await db.collection('profiles').deleteMany({});
     console.log(`Cleared ${result.deletedCount} profiles from database`);
@@ -1239,6 +1372,269 @@ app.get('/api/attendance/report', async (req, res) => {
     });
   }
 });
+
+// ============================================================
+// Staff pass (moving wave QR)
+// Staff log in with their LAG ID and a password they choose the
+// first time. The pass shows their profile's qrCode as a moving
+// wave QR (pass.html and the StaffPass app). No time or usage
+// limit: regenerating the QR in the admin app revokes it.
+// ============================================================
+
+// Staff tokens use their own key, so a staff token can never be
+// used on admin routes (authenticateToken).
+const STAFF_SECRET = crypto
+  .createHmac('sha256', String(process.env.JWT_SECRET || ''))
+  .update('staff-pass')
+  .digest('hex');
+const STAFF_TOKEN_DAYS = 180;
+const MIN_PASSWORD = 6;
+
+function staffToken(profile) {
+  return jwt.sign(
+    { lagId: profile.lagId, kind: 'staff' },
+    STAFF_SECRET,
+    { expiresIn: `${STAFF_TOKEN_DAYS}d` }
+  );
+}
+
+// LAG IDs are matched without caring about upper/lower case
+function lagIdQuery(lagId) {
+  const safe = String(lagId).trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return { lagId: { $regex: `^${safe}$`, $options: 'i' } };
+}
+
+function passBody(profile) {
+  return {
+    name: profile.name,
+    lagId: profile.lagId,
+    // null until an admin generates a QR for this profile
+    qrCode: profile.qrCode || null
+  };
+}
+
+// Slow down password guessing: 5 wrong tries per LAG ID -> 15 min wait
+const staffFailures = new Map();
+function staffLocked(key) {
+  const f = staffFailures.get(key);
+  return f && f.until > Date.now();
+}
+function staffFailed(key) {
+  const f = staffFailures.get(key) || { count: 0, until: 0 };
+  f.count += 1;
+  if (f.count >= 5) {
+    f.count = 0;
+    f.until = Date.now() + 15 * 60000;
+  }
+  staffFailures.set(key, f);
+}
+
+function authenticateStaff(req, res, next) {
+  const header = req.headers['authorization'] || '';
+  const token = header.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Please log in.' });
+  }
+  try {
+    const data = jwt.verify(token, STAFF_SECRET);
+    if (data.kind !== 'staff') throw new Error('wrong token');
+    req.staff = data;
+    next();
+  } catch (error) {
+    res.status(401).json({
+      success: false,
+      error: 'Your session has ended. Please log in again.'
+    });
+  }
+}
+
+// A token stops working after the password is changed or reset
+async function currentStaffProfile(req) {
+  const profile = await db.collection('profiles').findOne(
+    { lagId: req.staff.lagId },
+    { projection: { name: 1, lagId: 1, qrCode: 1, passwordChangedAt: 1 } }
+  );
+  if (!profile) return null;
+  const changed = profile.passwordChangedAt
+    ? new Date(profile.passwordChangedAt).getTime() : 0;
+  if (req.staff.iat * 1000 < changed - 1000) return null;
+  return profile;
+}
+
+// Log in. If no password is set yet: { needsSetup: true }
+app.post('/api/staff/login', async (req, res) => {
+  try {
+    const { lagId, password } = req.body || {};
+    if (!lagId || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Enter your LAG ID and password.'
+      });
+    }
+    const key = String(lagId).trim().toUpperCase();
+    if (staffLocked(key)) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many wrong attempts. Try again in 15 minutes.'
+      });
+    }
+
+    const profile = await db.collection('profiles').findOne(
+      lagIdQuery(lagId),
+      { projection: { name: 1, lagId: 1, qrCode: 1, passwordHash: 1 } }
+    );
+    if (!profile) {
+      staffFailed(key);
+      return res.status(401).json({
+        success: false,
+        error: 'LAG ID or password is not correct.'
+      });
+    }
+    if (!profile.passwordHash) {
+      return res.json({ success: false, needsSetup: true });
+    }
+    const ok = await bcrypt.compare(String(password), profile.passwordHash);
+    if (!ok) {
+      staffFailed(key);
+      return res.status(401).json({
+        success: false,
+        error: 'LAG ID or password is not correct.'
+      });
+    }
+    staffFailures.delete(key);
+    res.json({
+      success: true,
+      token: staffToken(profile),
+      pass: passBody(profile)
+    });
+  } catch (error) {
+    console.error('Staff login error:', error);
+    res.status(500).json({ success: false, error: 'Login failed.' });
+  }
+});
+
+// First use: choose a password (only while none is set)
+app.post('/api/staff/setup', async (req, res) => {
+  try {
+    const { lagId, password } = req.body || {};
+    if (!lagId || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Enter your LAG ID and a password.'
+      });
+    }
+    if (String(password).length < MIN_PASSWORD) {
+      return res.status(400).json({
+        success: false,
+        error: `Use at least ${MIN_PASSWORD} characters.`
+      });
+    }
+    const profile = await db.collection('profiles').findOne(
+      lagIdQuery(lagId),
+      { projection: { name: 1, lagId: 1, qrCode: 1, passwordHash: 1 } }
+    );
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        error: 'No staff profile has this LAG ID.'
+      });
+    }
+    const hash = await bcrypt.hash(String(password), 10);
+    // Only succeeds if still no password, so two people can't race
+    const result = await db.collection('profiles').updateOne(
+      { _id: profile._id, passwordHash: { $in: [null, ''] } },
+      { $set: { passwordHash: hash, passwordChangedAt: new Date() } }
+    );
+    if (result.modifiedCount === 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'A password is already set. Log in instead.'
+      });
+    }
+    console.log(`Staff password created for ${profile.lagId}`);
+    res.json({
+      success: true,
+      token: staffToken(profile),
+      pass: passBody(profile)
+    });
+  } catch (error) {
+    console.error('Staff setup error:', error);
+    res.status(500).json({ success: false, error: 'Could not set password.' });
+  }
+});
+
+// The logged-in staff member's pass
+app.get('/api/staff/pass', authenticateStaff, async (req, res) => {
+  try {
+    const profile = await currentStaffProfile(req);
+    if (!profile) {
+      return res.status(401).json({
+        success: false,
+        error: 'Your session has ended. Please log in again.'
+      });
+    }
+    res.json({ success: true, pass: passBody(profile) });
+  } catch (error) {
+    console.error('Staff pass error:', error);
+    res.status(500).json({ success: false, error: 'Could not load pass.' });
+  }
+});
+
+// Change own password
+app.post('/api/staff/password', authenticateStaff, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!newPassword || String(newPassword).length < MIN_PASSWORD) {
+      return res.status(400).json({
+        success: false,
+        error: `Use at least ${MIN_PASSWORD} characters.`
+      });
+    }
+    const profile = await db.collection('profiles').findOne(
+      { lagId: req.staff.lagId },
+      { projection: { name: 1, lagId: 1, qrCode: 1, passwordHash: 1 } }
+    );
+    const ok = profile && profile.passwordHash &&
+      await bcrypt.compare(String(currentPassword || ''), profile.passwordHash);
+    if (!ok) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is not correct.'
+      });
+    }
+    const hash = await bcrypt.hash(String(newPassword), 10);
+    await db.collection('profiles').updateOne(
+      { _id: profile._id },
+      { $set: { passwordHash: hash, passwordChangedAt: new Date() } }
+    );
+    res.json({ success: true, token: staffToken(profile) });
+  } catch (error) {
+    console.error('Staff password error:', error);
+    res.status(500).json({ success: false, error: 'Could not change password.' });
+  }
+});
+
+// Admin: clear a staff member's password so they can set a new one
+app.post('/api/profiles/lagid/:lagId/reset-password', authenticateToken,
+  async (req, res) => {
+    try {
+      const result = await db.collection('profiles').updateOne(
+        { lagId: req.params.lagId },
+        {
+          $unset: { passwordHash: '' },
+          $set: { passwordChangedAt: new Date() }
+        }
+      );
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ success: false, error: 'Profile not found' });
+      }
+      res.json({ success: true, message: 'Password reset' });
+    } catch (error) {
+      console.error('Reset password error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
 
 // Health check
 app.get('/api/health', (req, res) => {
